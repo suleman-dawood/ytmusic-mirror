@@ -1,133 +1,100 @@
 # ytmusic-mirror
 
-Mirror your **public YouTube Music playlists** into a local folder of MP3
-albums, keeping the folder structure and its songs in lock-step with your
-account.
+Keep a local folder of MP3s in sync with your **public YouTube Music playlists**.
+Each playlist becomes a folder; songs, order and folders all follow your account.
+
+Works on **Windows and Linux**.
 
 ```
-~/Music/MP3s/
+~/Music/MP3s/                    <- your master folder
 ├── Road Trip/
 │   ├── 01. Kickstart My Heart-Motley Crue-9lQ7.mp3
-│   ├── 02. Panama-Van Halen-abc12.mp3
 │   └── .playlist_config.json
 ├── Gym Mix/
-│   └── ...
-└── _Archive/          ← everything removed from your account lands here
+└── _Archive/                    <- safe-keeps everything removed from your account
 ```
 
-It is a thin, non-interactive driver around the excellent
-[YouTube Music Playlist Downloader](https://github.com/onnowhere/youtube_music_playlist_downloader)
-(which is vendored here under MIT), adding the account-level and cleanup
-behaviour that tool's interactive menu does not provide:
+## What it does
 
-| Behaviour | ytmusic-mirror |
-| --- | --- |
-| New playlist on your account | creates a matching folder and downloads it |
-| Playlist renamed on your account | renames the local folder (and album tags) |
-| Playlist deleted from your account | moves the folder to `_Archive/deleted/<id>` |
-| Song added to a playlist | downloads it into the folder |
-| Song reordered on the playlist | renumbers/reorders the local files |
-| Song removed from a playlist, video still up | **deletes** the local file |
-| Song removed from a playlist, video **delisted** | keeps a copy in `_Archive/delisted/<id>` |
+- Discovers your playlists (from your channel or an explicit list of URLs).
+- **New playlist** → creates a folder and downloads it.
+- **Playlist renamed** → renames the local folder (and album tags).
+- **Playlist deleted** → moves the folder into `_Archive/deleted/<id>`.
+- **Song added / reordered** → downloaded / renumbered into place.
+- **Song you removed** (video still on YouTube) → deleted locally.
+- **Song delisted by YouTube** (video gone/private) → kept in `_Archive/delisted/<id>`.
 
-## How it decides "delisted" vs "removed"
-
-After each playlist sync, any local song whose video id is no longer present in
-the remote playlist is probed:
-
-* if the YouTube video is still playable, the song was removed from the
-  playlist by you → the local file is **deleted**;
-* if the video is gone/private/region-blocked, the track was delisted → the
-  file is **moved into `_Archive/delisted/<playlist-id>/`** so you never lose it.
-
-> Only songs **you** remove from a playlist get deleted. Anything YouTube takes
-> down is preserved automatically. Run `sync --dry-run` first if you want a
-> preview, or set `orphan_policy` to `archive` to never delete anything.
+If unsure, run `sync --dry-run` first, or set `orphan_policy` to `archive`
+to never delete anything.
 
 ## Requirements
 
-* Python 3.9+
-* `yt-dlp`, `mutagen`, `pillow`, `langcodes`, `requests` (installed
-  automatically with the package)
-* `ffmpeg` available on `PATH`
+- Python 3.9+
+- `ffmpeg` on your `PATH`
+
+Everything else is installed automatically with the package.
 
 ## Install
 
 ```sh
 pip install .
-# or, from PyPI once published:
+# or, once on PyPI:
 # pip install ytmusic-mirror
 ```
 
 ## Quick start
 
 ```sh
-# 1. create the config (default ~/.config/ytmusic-mirror/config.json)
-ytmusic-mirror init
+# 1. Create a config, telling it where your master folder is.
+ytmusic-mirror init --dir "~/Music/MP3s"          # Linux/macOS
+ytmusic-mirror init --dir "%USERPROFILE%\Music\MP3s"   # Windows
 
-# 2. set your channel in the config (e.g. https://www.youtube.com/@YourHandle),
-#    or add specific playlist URLs:
+# 2. Tell it what to mirror. Edit the config file it created and set
+#    "channel_url": "https://www.youtube.com/@YourHandle",
+#    or add playlist URLs directly:
 ytmusic-mirror add "https://music.youtube.com/playlist?list=..."
+
+# 3. Sync
+ytmusic-mirror sync                     # update everything
+ytmusic-mirror sync --dry-run           # preview only, changes nothing
+ytmusic-mirror sync --dir "/some/else"  # override the master folder
+ytmusic-mirror remote                   # list what would be synced
 ```
 
-`config.json`:
+The config file lives at `%APPDATA%\ytmusic-mirror\config.json` on Windows and
+`~/.config/ytmusic-mirror/config.json` (or `$XDG_CONFIG_HOME`) on Linux. You can
+point to another one with `-c <path>` on every command.
 
-```jsonc
-{
-  "music_dir": "~/Music/MP3s",
-  // Public playlists are discovered from your channel's /playlists tab.
-  "channel_url": "https://www.youtube.com/@YourHandle",
-  // Optional: extra playlist URLs (e.g. playlists not shown on your channel).
-  "playlists": [],
-  // Optional, for private/age-restricted content:
-  "cookies_from_browser": "",   // e.g. "chromium", "firefox", "chrome"
-  "cookie_file": "",
-  // Where removed/delisted things go. Defaults to <music_dir>/_Archive.
-  "archive_dir": "",
-  // What to do when a whole playlist disappears from your account:
-  //   archive (default, safe) | delete | keep
-  "deleted_playlist_policy": "archive",
-  // How to treat songs missing from a remote playlist:
-  //   smart (default) delete-if-still-on-YouTube else archive
-  //   archive (never delete) | delete (never archive)
-  "orphan_policy": "smart",
-  // Extra settings merged into freshly created playlist configs
-  // (see the YouTube Music Playlist Downloader README for keys).
-  "download": {
-    "audio_codec": "mp3",
-    "track_num_in_name": true,
-    "use_title": true
-  }
-}
-```
+## Interrupted or large downloads?
 
-### Sync
+No problem. Sync works playlist-by-playlist and downloads songs one at a time;
+finished songs and playlists are never re-done. If you stop the process (Ctrl+C,
+power loss, crash) just run the same command again — it resumes where it left
+off. Any leftover `.part`/`.tmp` files from an interrupted download are cleaned
+up automatically on the next run.
+
+## Logs
+
+Normal mode shows live progress (which playlist, per-song download bars) and a
+summary at the end.
 
 ```sh
-ytmusic-mirror sync           # update everything
-ytmusic-mirror sync --dry-run # preview only, changes nothing
-ytmusic-mirror remote         # list the playlists that would be synced
-ytmusic-mirror remote --json
+ytmusic-mirror sync            # show everything
+ytmusic-mirror sync --nolog    # quiet: no progress lines, summary + errors only
 ```
 
-Run it manually, or schedule it:
+## Config options
 
-```sh
-# every night at 02:00 (example cron line)
-0 2 * * * /path/to/ytmusic-mirror sync >> ~/.cache/ytmusic-mirror.log 2>&1
-```
-
-## Notes
-
-* Folders are identified by playlist id (via the `.playlist_config.json` file
-  the downloader keeps in each folder), so renames never cause re-downloads or
-  duplicates.
-* Playlist folders created here are fully compatible with the interactive
-  `youtube-music-downloader` menu if you want to manage one by hand.
-* The tool intentionally never touches directories starting with `.` or `_`
-  (your `_Archive` lives safely inside the music folder).
-* Public **unlisted** playlists work too; **private** ones need
-  `cookies_from_browser` / `cookie_file` set.
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `music_dir` | `~/Music/MP3s` | Master folder playlists are synced into |
+| `channel_url` | `""` | Your channel → public playlists are auto-discovered |
+| `playlists` | `[]` | Extra playlist URLs to mirror |
+| `cookies_from_browser` / `cookie_file` | `""` | For private / age-restricted content |
+| `archive_dir` | `<music_dir>/_Archive` | Where removed/delisted things go |
+| `deleted_playlist_policy` | `archive` | `archive` \| `delete` \| `keep` |
+| `orphan_policy` | `smart` | `smart` (delete removed, archive delisted) \| `archive` \| `delete` |
+| `download` | `{}` | Extra settings for new playlists (codec, naming, ...) |
 
 ## Tests
 
@@ -140,7 +107,7 @@ pytest
 
 MIT. Contains a vendored copy of
 [youtube_music_playlist_downloader](https://github.com/onnowhere/youtube_music_playlist_downloader)
-(c) 2022 onnowhere, MIT, see `ytmusic_mirror/vendor/UPSTREAM_LICENSE.txt`.
+(c) 2022 onnowhere, MIT — see `ytmusic_mirror/vendor/UPSTREAM_LICENSE.txt`.
 
 For personal archiving only. Respect YouTube's Terms of Service and applicable
 copyright law.

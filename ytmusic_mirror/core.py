@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -80,14 +81,19 @@ class SyncReport:
 
 
 class Logger:
-    def __init__(self, out: Callable[[str], None] = print):
-        self._out = out
+    """Streams progress/info to stdout (unless quiet) and warnings to stderr."""
+
+    def __init__(self, out: Callable[[str], None] = None, quiet: bool = False):
+        self._out = out or (lambda message: print(message))
+        self.quiet = quiet
 
     def info(self, message: str) -> None:
-        self._out(message)
+        if not self.quiet:
+            self._out(message)
 
     def warn(self, message: str) -> None:
-        self._out(f"[warn] {message}")
+        if not self.quiet:
+            print(f"[warn] {message}", file=sys.stderr)
 
 
 # --------------------------------------------------------------------------- #
@@ -284,27 +290,41 @@ def snapshot_local_playlists(music_dir: Path) -> Dict[str, LocalPlaylist]:
 
 
 def sync(cfg: Config, dry_run: bool = False, log: Optional[Logger] = None) -> SyncReport:
-    """Mirror the configured remote playlists into the music directory."""
+    """Mirror the configured remote playlists into the music directory.
+
+    Designed to be resumable: per-playlist work is isolated so one failure or an
+    interrupted run never loses finished work - simply run it again to continue.
+    """
     log = log or Logger()
     report = SyncReport()
-
-    cfg.music_dir.mkdir(parents=True, exist_ok=True)
     previous_cwd = Path.cwd()
+    try:
+        _sync_locked(cfg, dry_run=dry_run, report=report, log=log)
+    finally:
+        if Path.cwd() != previous_cwd:
+            os.chdir(previous_cwd)
+    return report
+
+
+def _sync_locked(
+    cfg: Config, dry_run: bool, report: SyncReport, log: Logger
+) -> None:
+    """Body of sync(), executed with the music dir as the working directory."""
+    cfg.music_dir.mkdir(parents=True, exist_ok=True)
     os.chdir(cfg.music_dir)
+
     try:
         remote = discover_remote_playlists(cfg)
     except Exception as e:
         report.errors.append(f"Playlist discovery failed: {e}")
-        os.chdir(previous_cwd)
-        return report
+        return
 
     if not remote and not cfg.channel_url and not cfg.playlists:
         report.errors.append(
             "No playlist source configured. Set 'channel_url' or add playlist "
             "URLs to 'playlists' in the config file."
         )
-        os.chdir(previous_cwd)
-        return report
+        return
 
     if not remote:
         log.warn(
@@ -315,17 +335,25 @@ def sync(cfg: Config, dry_run: bool = False, log: Optional[Logger] = None) -> Sy
     remote_by_id = {rp.id: rp for rp in remote}
     local = snapshot_local_playlists(cfg.music_dir)
 
+    total = len(remote) + len([i for i in local if i not in remote_by_id])
+    processed = 0
+
     # Order: keep channel/remote ordering, then handle disappeared folders.
     for rp in remote:
+        processed += 1
         local_pl = local.get(rp.id)
         folder = local_pl.folder if local_pl else ""
         action = "update" if local_pl else "create"
         plan = PlaylistPlan(rp.id, rp.title, rp.url, action, folder=folder)
-        _execute_plan(cfg, plan, dry_run=dry_run, report=report, log=log)
+        _execute_plan(
+            cfg, plan, dry_run=dry_run, report=report, log=log,
+            seq=(processed, total),
+        )
 
     for playlist_id, local_pl in sorted(local.items()):
         if playlist_id in remote_by_id:
             continue
+        processed += 1
         plan = PlaylistPlan(
             remote_id=playlist_id,
             remote_title=local_pl.folder,
@@ -333,10 +361,10 @@ def sync(cfg: Config, dry_run: bool = False, log: Optional[Logger] = None) -> Sy
             action="archive_deleted",
             folder=local_pl.folder,
         )
-        _execute_plan(cfg, plan, dry_run=dry_run, report=report, log=log)
-
-    os.chdir(previous_cwd)
-    return report
+        _execute_plan(
+            cfg, plan, dry_run=dry_run, report=report, log=log,
+            seq=(processed, total),
+        )
 
 
 def _execute_plan(
@@ -345,7 +373,10 @@ def _execute_plan(
     dry_run: bool,
     report: SyncReport,
     log: Logger,
+    seq: Optional[tuple] = None,
 ) -> None:
+    prefix = f"[{seq[0]}/{seq[1]}] " if seq else ""
+
     if plan.action == "archive_deleted":
         _handle_deleted_playlist(cfg, plan, dry_run, report, log)
         return
@@ -391,7 +422,7 @@ def _execute_plan(
     if dry_run:
         _classify_orphans_dry(cfg, plan, orphan_ids, report)
         log.info(
-            f"[dry-run] {plan.action}: '{plan.remote_title}'"
+            f"{prefix}[dry-run] {plan.action}: '{plan.remote_title}'"
             f" (+{plan.new_songs} new, {plan.removed_songs} to reconcile)"
             + (f" rename folder to '{plan.rename_to}'" if plan.rename_to else "")
         )
@@ -403,17 +434,34 @@ def _execute_plan(
         _reconcile_orphans(cfg, plan, orphan_ids, report, log)
 
     log.info(
-        f"{'Creating' if plan.action == 'create' else 'Updating'} "
+        f"{prefix}{'Creating' if plan.action == 'create' else 'Updating'} "
         f"playlist '{plan.remote_title}'... (+{plan.new_songs} new)"
     )
     try:
+        _clean_temp_files(cfg.music_dir / plan.folder)
         engine.generate_playlist(
             config,
             update=(plan.action == "update"),
             current_playlist_name=plan.folder if plan.action == "update" else None,
         )
+        log.info(f"{prefix}Finished '{plan.remote_title}'.")
     except Exception as e:
         report.errors.append(f"Playlist '{plan.remote_title}' failed: {e}")
+
+
+_TEMP_SUFFIXES = (".part", ".ytdl", ".temp", ".tmp")
+
+
+def _clean_temp_files(folder: Path) -> None:
+    """Remove interrupted-download leftovers so a re-run starts clean."""
+    if not folder.is_dir():
+        return
+    for child in folder.iterdir():
+        if child.is_file() and child.name.lower().endswith(_TEMP_SUFFIXES):
+            try:
+                child.unlink()
+            except OSError:
+                pass
 
 
 def _merge_cookies(cfg: Config, config: dict) -> None:

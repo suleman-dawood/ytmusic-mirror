@@ -207,3 +207,30 @@ def test_pretty_report():
     text = pretty_report(report)
     assert "Created: A" in text
     assert "vid1" in text
+
+
+def test_logger_quiet(capsys):
+    core.Logger().info("shown")
+    core.Logger().warn("warned")
+    core.Logger(quiet=True).info("hidden")
+    out, err = capsys.readouterr()
+    assert "shown" in out
+    assert "warned" in err
+    assert "hidden" not in out and "hidden" not in err
+
+
+def test_clean_temp_files(tmp_path):
+    (tmp_path / "song.mp3.part").write_bytes(b"x")
+    (tmp_path / "song.mp3.ytdl").write_bytes(b"x")
+    (tmp_path / "song.mp3").write_bytes(b"x")
+    core._clean_temp_files(tmp_path)
+    names = {p.name for p in tmp_path.iterdir()}
+    assert names == {"song.mp3"}
+
+
+def test_default_config_path_os(monkeypatch):
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    from ytmusic_mirror.config import default_config_path
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/xdg")
+    assert str(default_config_path()).startswith("/tmp/xdg/ytmusic-mirror")

@@ -11,10 +11,30 @@ from typing import List, Optional
 CONFIG_FILE_NAME = ".playlist_config.json"
 ARCHIVE_DIR_NAME = "_Archive"
 
-DEFAULT_CONFIG_PATH = Path("~/.config/ytmusic-mirror/config.json").expanduser()
+DEFAULT_MUSIC_DIR = "~/Music/MP3s"
+
+
+def default_config_path() -> Path:
+    """OS-aware location for the config file.
+
+    Windows: %APPDATA%\\ytmusic-mirror\\config.json
+    Linux/macOS: $XDG_CONFIG_HOME/ytmusic-mirror/config.json (or ~/.config)
+    """
+    if os.name == "nt":
+        base = os.environ.get("APPDATA")
+        if base:
+            return Path(base) / "ytmusic-mirror" / "config.json"
+        return Path.home() / "ytmusic-mirror" / "config.json"
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if base:
+        return Path(base) / "ytmusic-mirror" / "config.json"
+    return Path.home() / ".config" / "ytmusic-mirror" / "config.json"
+
+
+DEFAULT_CONFIG_PATH = default_config_path()
 
 DEFAULTS = {
-    "music_dir": "~/Music/MP3s",
+    "music_dir": DEFAULT_MUSIC_DIR,
     "channel_url": "",
     "playlists": [],
     "cookies_from_browser": "",

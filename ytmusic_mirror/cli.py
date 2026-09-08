@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Optional
 
 from . import __version__
 from .config import DEFAULT_CONFIG_PATH, Config, write_default_config
@@ -26,23 +27,36 @@ def _add_config_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_dir_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-d",
+        "--dir",
+        default=None,
+        metavar="DIR",
+        help="Master folder where playlists are synced (overrides config 'music_dir')",
+    )
+
+
+def _config_path(args: argparse.Namespace) -> Path:
+    return Path(args.config).expanduser() if args.config else DEFAULT_CONFIG_PATH
+
+
 def _load_config(args: argparse.Namespace) -> Config:
-    return Config.load(Path(args.config) if args.config else None)
+    cfg = Config.load(_config_path(args))
+    if getattr(args, "dir", None):
+        cfg.music_dir = Path(args.dir).expanduser().resolve()
+    return cfg
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
-    config_path = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
-    if config_path.expanduser().exists() and not args.force:
+    config_path = _config_path(args)
+    if config_path.exists() and not args.force:
         print(f"Config already exists at {config_path}. Use --force to overwrite.")
         return 1
-    if args.music_dir is None and not config_path.expanduser().exists():
-        parent = Path("~/Music/MP3s").expanduser()
-        if not parent.exists():
-            # Only switch to an existing MP3s if present; otherwise keep default.
-            pass
-    path = write_default_config(config_path, music_dir=args.music_dir)
+    path = write_default_config(config_path, music_dir=args.dir)
     print(f"Wrote default config to {path}")
     print("Edit it to set 'channel_url' (your YouTube channel) or 'playlists'.")
+    print(f"Playlists will be synced into the master folder set in 'music_dir'.")
     return 0
 
 
@@ -66,18 +80,28 @@ def _cmd_remote(args: argparse.Namespace) -> int:
 
 def _cmd_sync(args: argparse.Namespace) -> int:
     cfg = _load_config(args)
+    log = Logger(quiet=args.nolog)
     if args.dry_run:
         print("DRY RUN - no files will be downloaded, moved, renamed or deleted.\n")
-    report = sync(cfg, dry_run=args.dry_run, log=Logger())
+    try:
+        report = sync(cfg, dry_run=args.dry_run, log=log)
+    except KeyboardInterrupt:
+        print("\nInterrupted. Nothing was corrupted: just run the same command "
+              "again and it will resume where it left off.", file=sys.stderr)
+        return 130
     print(pretty_report(report))
     return 1 if report.errors else 0
 
 
 def _cmd_add(args: argparse.Namespace) -> int:
-    config_path = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
-    cfg = Config.load(config_path) if config_path.expanduser().exists() else Config(
-        music_dir=Path("~/Music/MP3s").expanduser()
-    )
+    config_path = _config_path(args)
+    if config_path.exists():
+        cfg = Config.load(config_path)
+    else:
+        print(f"No config at {config_path}; creating one. Add your channel or "
+              "more playlists afterwards.", file=sys.stderr)
+        write_default_config(config_path)
+        cfg = Config.load(config_path)
     added = []
     for url in args.urls:
         if url not in cfg.playlists:
@@ -90,17 +114,18 @@ def _cmd_add(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv=None) -> int:
+def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ytmusic-mirror",
-        description="Mirror public YouTube Music playlists to local MP3 folders.",
+        description="Mirror public YouTube Music playlists to local MP3 folders "
+                    "(Windows and Linux).",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="Write a default config file")
     _add_config_arg(p_init)
-    p_init.add_argument("--music-dir", default=None, help="Target music folder (default ~/Music/MP3s)")
+    _add_dir_arg(p_init)
     p_init.add_argument("--force", action="store_true", help="Overwrite an existing config")
     p_init.set_defaults(func=_cmd_init)
 
@@ -109,9 +134,14 @@ def main(argv=None) -> int:
     p_remote.add_argument("--json", action="store_true", help="Print as JSON")
     p_remote.set_defaults(func=_cmd_remote)
 
-    p_sync = sub.add_parser("sync", help="Sync remote playlists into the music folder")
+    p_sync = sub.add_parser("sync", help="Sync remote playlists into the master folder")
     _add_config_arg(p_sync)
+    _add_dir_arg(p_sync)
     p_sync.add_argument("--dry-run", action="store_true", help="Only print what would change")
+    p_sync.add_argument(
+        "--nolog", action="store_true",
+        help="Suppress progress/info output (errors are still shown)",
+    )
     p_sync.set_defaults(func=_cmd_sync)
 
     p_add = sub.add_parser("add", help="Add explicit playlist URLs to the config")
