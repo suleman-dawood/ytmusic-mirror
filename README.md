@@ -79,7 +79,8 @@ ytmusic-mirror remove "<playlist-url>"   # stop syncing one playlist
 ```
 
 Paths: use an absolute path or `~/...` (note the slash — `~Music/...` is
-invalid and is rejected with a hint).
+invalid and is rejected with a hint). Only `~`, `~/` and `~\` are treated as
+home references; other `~user/...` forms are not supported.
 
 ### yt-dlp "Signature solving failed" / EJS warnings
 
