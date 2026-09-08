@@ -212,6 +212,8 @@ def _config_for_new_playlist(cfg: Config, url: str) -> dict:
         base["cookies_from_browser"] = cfg.cookies_from_browser
     if cfg.cookie_file and not base.get("cookie_file"):
         base["cookie_file"] = cfg.cookie_file
+    if cfg.remote_components and not base.get("remote_components"):
+        base["remote_components"] = list(cfg.remote_components)
     return base
 
 
@@ -576,6 +578,8 @@ def _merge_cookies(cfg: Config, config: dict) -> None:
         config["cookies_from_browser"] = cfg.cookies_from_browser
     if not config.get("cookie_file") and cfg.cookie_file:
         config["cookie_file"] = cfg.cookie_file
+    if not config.get("remote_components") and cfg.remote_components:
+        config["remote_components"] = list(cfg.remote_components)
 
 
 def _handle_deleted_playlist(

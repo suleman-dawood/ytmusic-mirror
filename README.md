@@ -81,6 +81,17 @@ ytmusic-mirror remove "<playlist-url>"   # stop syncing one playlist
 Paths: use an absolute path or `~/...` (note the slash — `~Music/...` is
 invalid and is rejected with a hint).
 
+### yt-dlp "Signature solving failed" / EJS warnings
+
+If a sync shows warnings like `Signature solving failed: Some formats may be
+missing` or `Remote components ... were skipped`, YouTube is requiring yt-dlp
+to solve a JS challenge. Allow yt-dlp to fetch its solver by adding this to the
+config (a JS runtime such as Deno or Node must be installed):
+
+```json
+"remote_components": ["ejs:github"]
+```
+
 The config file lives at `%APPDATA%\ytmusic-mirror\config.json` on Windows and
 `~/.config/ytmusic-mirror/config.json` (or `$XDG_CONFIG_HOME`) on Linux. You can
 point to another one with `-c <path>` on every command.
@@ -111,6 +122,7 @@ ytmusic-mirror sync --nolog    # quiet: no progress lines, summary + errors only
 | `channel_url` | `""` | Your channel → public playlists are auto-discovered |
 | `playlists` | `[]` | Extra playlist URLs to mirror |
 | `cookies_from_browser` / `cookie_file` | `""` | For private / age-restricted content |
+| `remote_components` | `[]` | Passed to yt-dlp. Set to `["ejs:github"]` to allow yt-dlp to fetch its JS challenge solver |
 | `archive_dir` | `<music_dir>/_Archive` | Where removed/delisted things go |
 | `deleted_playlist_policy` | `archive` | `archive` \| `delete` \| `keep` |
 | `orphan_policy` | `smart` | `smart` (delete removed, archive delisted) \| `archive` \| `delete` |

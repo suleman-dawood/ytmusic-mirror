@@ -217,6 +217,8 @@ def _cmd_status(args: argparse.Namespace) -> int:
     print(f"orphan_policy: {cfg.orphan_policy}")
     if cfg.cookies_from_browser or cfg.cookie_file:
         print(f"cookies      : browser={cfg.cookies_from_browser or '-'} file={cfg.cookie_file or '-'}")
+    if cfg.remote_components:
+        print(f"remote_components: {', '.join(cfg.remote_components)}")
     return 0
 
 

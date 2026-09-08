@@ -75,6 +75,7 @@ def get_playlist_info(config: dict):
         "cookiefile": None if config["cookie_file"] == "" else config["cookie_file"],
         "cookiesfrombrowser": None if config["cookies_from_browser"] == "" else tuple(config["cookies_from_browser"].split(":")),
         "extractor_args": config["extractor_args"],
+        "remote_components": list(config.get("remote_components") or []),
         "playlistreverse": config["reverse_playlist"]
     }
     with YoutubeDL(ytdl_opts) as ytdl:
@@ -167,6 +168,7 @@ def get_song_info_ytdl(track_num, config: dict):
         "cookiefile": None if config["cookie_file"] == "" else config["cookie_file"],
         "cookiesfrombrowser": None if config["cookies_from_browser"] == "" else tuple(config["cookies_from_browser"].split(":")),
         "extractor_args": config["extractor_args"],
+        "remote_components": list(config.get("remote_components") or []),
         "writesubtitles": True,
         "allsubtitles": True,
         "postprocessors": [{
@@ -478,6 +480,7 @@ def download_song(link, playlist_name, track_num, config: dict):
         "cookiefile": None if config["cookie_file"] == "" else config["cookie_file"],
         "cookiesfrombrowser": None if config["cookies_from_browser"] == "" else tuple(config["cookies_from_browser"].split(":")),
         "extractor_args": config["extractor_args"],
+        "remote_components": list(config.get("remote_components") or []),
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": config["audio_codec"],
@@ -744,6 +747,7 @@ def setup_config(config: dict):
         "cookie_file": "",
         "cookies_from_browser": "",
         "extractor_args": {},
+        "remote_components": [],
 
         "verbose": False,
 

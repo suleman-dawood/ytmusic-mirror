@@ -39,6 +39,7 @@ DEFAULTS = {
     "playlists": [],
     "cookies_from_browser": "",
     "cookie_file": "",
+    "remote_components": [],
     "archive_dir": "",
     "deleted_playlist_policy": "archive",
     "orphan_policy": "smart",
@@ -73,6 +74,7 @@ class Config:
     playlists: List[str] = field(default_factory=list)
     cookies_from_browser: str = ""
     cookie_file: str = ""
+    remote_components: List[str] = field(default_factory=list)
     archive_dir: Optional[Path] = None
     deleted_playlist_policy: str = "archive"
     orphan_policy: str = "smart"
@@ -91,6 +93,7 @@ class Config:
             "playlists": list(self.playlists),
             "cookies_from_browser": self.cookies_from_browser,
             "cookie_file": self.cookie_file,
+            "remote_components": list(self.remote_components),
             "archive_dir": str(self.archive_dir) if self.archive_dir else "",
             "deleted_playlist_policy": self.deleted_playlist_policy,
             "orphan_policy": self.orphan_policy,
@@ -107,6 +110,7 @@ class Config:
             playlists=[str(x) for x in merged.get("playlists") or []],
             cookies_from_browser=str(merged.get("cookies_from_browser") or ""),
             cookie_file=str(merged.get("cookie_file") or ""),
+            remote_components=[str(x) for x in merged.get("remote_components") or []],
             archive_dir=_expand_path(raw_archive) if raw_archive else None,
             deleted_playlist_policy=str(merged.get("deleted_playlist_policy") or "archive"),
             orphan_policy=str(merged.get("orphan_policy") or "smart"),
