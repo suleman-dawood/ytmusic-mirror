@@ -44,21 +44,33 @@ pip install .
 
 ## Quick start
 
+Everything is configured from the terminal — no manual file editing.
+
 ```sh
 # 1. Create a config, telling it where your master folder is.
 ytmusic-mirror init --dir "~/Music/MP3s"          # Linux/macOS
 ytmusic-mirror init --dir "%USERPROFILE%\Music\MP3s"   # Windows
 
-# 2. Tell it what to mirror. Edit the config file it created and set
-#    "channel_url": "https://www.youtube.com/@YourHandle",
-#    or add playlist URLs directly:
-ytmusic-mirror add "https://music.youtube.com/playlist?list=..."
+# 2. Tell it what to mirror:
+#    - your channel (all its public playlists are auto-discovered), or
+#    - specific playlist URLs
+ytmusic-mirror channel "https://www.youtube.com/@YourHandle"   # or just "@YourHandle"
+ytmusic-mirror add "https://music.youtube.com/playlist?list=..."   # repeatable
 
 # 3. Sync
 ytmusic-mirror sync                     # update everything
 ytmusic-mirror sync --dry-run           # preview only, changes nothing
 ytmusic-mirror sync --dir "/some/else"  # override the master folder
 ytmusic-mirror remote                   # list what would be synced
+```
+
+Manage what you've configured:
+
+```sh
+ytmusic-mirror status               # show channel, playlists, folder, policies
+ytmusic-mirror channel              # show the configured channel
+ytmusic-mirror channel --clear      # remove the channel
+ytmusic-mirror remove "<playlist-url>"   # stop syncing one playlist
 ```
 
 The config file lives at `%APPDATA%\ytmusic-mirror\config.json` on Windows and
