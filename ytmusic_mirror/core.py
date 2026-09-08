@@ -19,6 +19,7 @@ import re
 import shutil
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
@@ -38,6 +39,7 @@ _UNAVAILABLE_TITLES = (
     "[Video unavailable]",
     "(Not available)",
 )
+SIDECAR_NAME = ".ytmusic-mirror.json"
 
 
 @dataclass
@@ -64,6 +66,7 @@ class PlaylistPlan:
     new_songs: int = 0
     removed_songs: int = 0
     delisted_songs: int = 0
+    unavailable: int = 0
     rename_to: str = ""
 
 
@@ -76,6 +79,7 @@ class SyncReport:
     archived_playlists: List[str] = field(default_factory=list)
     removed_songs: List[str] = field(default_factory=list)
     delisted_songs: List[str] = field(default_factory=list)
+    unavailable: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     skipped_playlists: List[str] = field(default_factory=list)
 
@@ -211,17 +215,56 @@ def _config_for_new_playlist(cfg: Config, url: str) -> dict:
     return base
 
 
-def _remote_entry_ids(config: dict) -> List[str]:
-    """The ordered list of video ids in a remote playlist (best effort)."""
+def _entry_available(entry: dict) -> bool:
+    """Best-effort check of whether a listed entry is actually playable."""
+    if entry.get("channel_id") is None:
+        return False
+    title = str(entry.get("title") or "").strip()
+    for marker in _UNAVAILABLE_TITLES:
+        if title.startswith(marker):
+            return False
+    return True
+
+
+def _remote_entries(config: dict) -> List[dict]:
+    """Fetch a remote playlist once, returning {id,title,available} dicts."""
     try:
         info = engine.get_playlist_info(config)
     except Exception:
         return []
-    ids: List[str] = []
+    entries = []
     for entry in info.get("entries") or []:
-        if entry and entry.get("id"):
-            ids.append(str(entry["id"]))
-    return ids
+        if not entry or not entry.get("id"):
+            continue
+        entries.append(
+            {
+                "id": str(entry["id"]),
+                "title": str(entry.get("title") or ""),
+                "available": _entry_available(entry),
+            }
+        )
+    return entries
+
+
+def _read_unavailable_notes(folder: Path) -> Dict[str, dict]:
+    """Read the per-playlist record of listed-but-unavailable video ids."""
+    sidecar = folder / SIDECAR_NAME
+    if sidecar.is_file():
+        try:
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+            notes = data.get("unavailable") or {}
+            return {str(k): v for k, v in notes.items() if isinstance(v, dict)}
+        except Exception:
+            return {}
+    return {}
+
+
+def _write_unavailable_notes(folder: Path, notes: Dict[str, dict]) -> None:
+    sidecar = folder / SIDECAR_NAME
+    data = {"version": 1, "unavailable": notes}
+    sidecar.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def _probe_video_available(video_id: str, cfg: Config) -> bool:
@@ -405,14 +448,23 @@ def _execute_plan(
     if plan.action == "update" and config.get("sync_folder_name", True) and plan.folder != expected_folder:
         plan.rename_to = expected_folder
         report.renamed.append(f"{plan.folder} -> {expected_folder}")
+    work_folder = plan.folder if plan.action == "update" else expected_folder
+    folder_abs = cfg.music_dir / work_folder
 
-    # Fetch remote song ids to compute add/remove deltas.
-    remote_ids = _remote_entry_ids(config)
-    remote_id_set = set(remote_ids)
+    # Fetch remote song ids to compute add/remove deltas. Entries that are
+    # listed but unavailable are tracked and never counted as "new" forever.
+    entries = _remote_entries(config)
+    remote_id_set = {e["id"] for e in entries}
+    unavailable_ids = {e["id"] for e in entries if not e["available"]}
+    entry_titles = {e["id"]: e["title"] for e in entries}
 
-    orphan_ids = sorted(set(local_files.keys()) - remote_id_set)
-    plan.new_songs = len(remote_id_set - set(local_files.keys()))
+    local_id_set = set(local_files.keys())
+    orphan_ids = sorted(local_id_set - remote_id_set)
+    available_new = sorted((remote_id_set - unavailable_ids) - local_id_set)
+    unavailable_new = sorted(unavailable_ids - local_id_set)
+    plan.new_songs = len(available_new)
     plan.removed_songs = len(orphan_ids)
+    plan.unavailable = len(unavailable_new)
 
     if plan.action == "create":
         report.created.append(plan.remote_title)
@@ -421,11 +473,14 @@ def _execute_plan(
 
     if dry_run:
         _classify_orphans_dry(cfg, plan, orphan_ids, report)
-        log.info(
+        message = (
             f"{prefix}[dry-run] {plan.action}: '{plan.remote_title}'"
             f" (+{plan.new_songs} new, {plan.removed_songs} to reconcile)"
             + (f" rename folder to '{plan.rename_to}'" if plan.rename_to else "")
         )
+        if plan.unavailable:
+            message += f", {plan.unavailable} listed-unavailable (will be noted)"
+        log.info(message)
         return
 
     # Reconcile orphaned songs first so the folder mirrors the live playlist,
@@ -438,7 +493,7 @@ def _execute_plan(
         f"playlist '{plan.remote_title}'... (+{plan.new_songs} new)"
     )
     try:
-        _clean_temp_files(cfg.music_dir / plan.folder)
+        _clean_temp_files(folder_abs)
         engine.generate_playlist(
             config,
             update=(plan.action == "update"),
@@ -447,6 +502,58 @@ def _execute_plan(
         log.info(f"{prefix}Finished '{plan.remote_title}'.")
     except Exception as e:
         report.errors.append(f"Playlist '{plan.remote_title}' failed: {e}")
+
+    if unavailable_new:
+        _note_unavailable_songs(
+            plan, folder_abs, unavailable_new, entry_titles,
+            unavailable_ids, report,
+        )
+        log.info(
+            f"{prefix}{len(unavailable_new)} song(s) listed as unavailable - "
+            f"recorded in '{folder_abs.name}/{SIDECAR_NAME}'. They stay noted "
+            f"(and are retried) until they become downloadable."
+        )
+
+
+def _note_unavailable_songs(
+    plan: PlaylistPlan,
+    folder_abs: Path,
+    unavailable_new: List[str],
+    entry_titles: Dict[str, str],
+    currently_unavailable: set,
+    report: SyncReport,
+) -> None:
+    """Persist listed-but-unavailable ids and drop notes that are no longer valid."""
+    if not folder_abs.is_dir():
+        return
+    notes = _read_unavailable_notes(folder_abs)
+    changed = False
+    now = datetime.now().isoformat(timespec="seconds")
+    for video_id in unavailable_new:
+        if video_id not in notes:
+            notes[video_id] = {
+                "first_seen": now,
+                "title": entry_titles.get(video_id, ""),
+            }
+            label = f"{plan.remote_title}: {video_id}"
+            if entry_titles.get(video_id):
+                label += f" ({entry_titles[video_id]})"
+            report.unavailable.append(label)
+            changed = True
+    # Prune: entry downloaded, no longer listed, or available again.
+    try:
+        present = set(engine.get_local_song_files(plan.folder).keys())
+    except Exception:
+        present = set()
+    for video_id in list(notes):
+        if video_id in present or video_id not in currently_unavailable:
+            del notes[video_id]
+            changed = True
+    if changed:
+        try:
+            _write_unavailable_notes(folder_abs, notes)
+        except OSError as e:
+            report.errors.append(f"Could not write {SIDECAR_NAME}: {e}")
 
 
 _TEMP_SUFFIXES = (".part", ".ytdl", ".temp", ".tmp")
@@ -573,26 +680,29 @@ def _reconcile_orphans(
                 report.errors.append(f"Could not archive '{file_path}': {e}")
 
 
+def _section(lines: list, header: str, items: List[str]) -> None:
+    if items:
+        lines.append(f"{header} ({len(items)}):")
+        lines.extend(f"  - {item}" for item in items)
+
+
 def pretty_report(report: SyncReport) -> str:
-    lines = []
-    if report.created:
-        lines.append(f"Created: {', '.join(report.created)}")
-    if report.renamed:
-        lines.append(f"Renamed: {', '.join(report.renamed)}")
-    if report.updated:
-        lines.append(f"Updated: {', '.join(report.updated)}")
-    if report.archived_playlists:
-        lines.append(f"Archived playlists: {', '.join(report.archived_playlists)}")
-    if report.deleted_playlists:
-        lines.append(f"Deleted playlists: {', '.join(report.deleted_playlists)}")
+    lines: List[str] = []
+    _section(lines, "Created playlists", report.created)
+    _section(lines, "Renamed playlists", report.renamed)
+    _section(lines, "Updated playlists", report.updated)
+    _section(lines, "Archived playlists", report.archived_playlists)
+    _section(lines, "Deleted playlists", report.deleted_playlists)
     if report.removed_songs:
-        lines.append(f"Songs removed from playlists (deleted locally):")
+        lines.append(f"Songs removed from playlists (deleted locally) ({len(report.removed_songs)}):")
         lines.extend(f"  - {x}" for x in report.removed_songs)
     if report.delisted_songs:
-        lines.append(f"Songs delisted on YouTube (archived):")
+        lines.append(f"Songs delisted on YouTube (archived) ({len(report.delisted_songs)}):")
         lines.extend(f"  - {x}" for x in report.delisted_songs)
-    if report.skipped_playlists:
-        lines.append(f"Skipped: {', '.join(report.skipped_playlists)}")
+    if report.unavailable:
+        lines.append(f"Songs listed as unavailable (recorded, not downloaded) ({len(report.unavailable)}):")
+        lines.extend(f"  - {x}" for x in report.unavailable)
+    _section(lines, "Skipped playlists", report.skipped_playlists)
     if report.errors:
         lines.append("Errors:")
         lines.extend(f"  ! {x}" for x in report.errors)

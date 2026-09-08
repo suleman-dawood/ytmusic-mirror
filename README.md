@@ -23,9 +23,13 @@ Works on **Windows and Linux**.
 - **Song added / reordered** → downloaded / renumbered into place.
 - **Song you removed** (video still on YouTube) → deleted locally.
 - **Song delisted by YouTube** (video gone/private) → kept in `_Archive/delisted/<id>`.
+- **Song listed but currently unavailable** → recorded in
+  `<playlist>/.ytmusic-mirror.json` and shown in the summary as "listed as
+  unavailable". It is never miscounted as a new download, and is retried on
+  later syncs until it becomes downloadable (then the note is dropped).
 
 If unsure, run `sync --dry-run` first, or set `orphan_policy` to `archive`
-to never delete anything.
+to never delete anything. Results are printed as a vertical summary list.
 
 ## Requirements
 

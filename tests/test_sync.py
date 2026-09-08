@@ -177,7 +177,7 @@ def test_sync_creates_and_updates(monkeypatch, tmp_path):
     monkeypatch.setattr(core, "discover_remote_playlists", lambda cfg: remote)
     monkeypatch.setattr(core.engine, "get_playlist_info", fake_get_playlist_info)
     monkeypatch.setattr(core.engine, "generate_playlist", fake_generate)
-    monkeypatch.setattr(core, "_remote_entry_ids", lambda config: [])
+    monkeypatch.setattr(core, "_remote_entries", lambda config: [])
     monkeypatch.setattr(core.engine, "get_local_song_files", lambda name: {})
 
     report = sync(cfg)
@@ -203,9 +203,11 @@ def test_sync_archives_deleted_playlist(monkeypatch, tmp_path):
 def test_pretty_report():
     report = SyncReport()
     report.created.append("A")
+    report.created.append("B")
     report.removed_songs.append("A: vid1")
     text = pretty_report(report)
-    assert "Created: A" in text
+    assert "Created playlists (2):" in text
+    assert "  - A" in text and "  - B" in text
     assert "vid1" in text
 
 
@@ -234,3 +236,30 @@ def test_default_config_path_os(monkeypatch):
 
     monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/xdg")
     assert str(default_config_path()).startswith("/tmp/xdg/ytmusic-mirror")
+
+
+def test_note_unavailable_songs(tmp_path, monkeypatch):
+    folder = tmp_path / "Play"
+    folder.mkdir()
+    plan = core.PlaylistPlan("PLp", "Play", "", "update", folder="Play")
+    monkeypatch.setattr(core.engine, "get_local_song_files", lambda n: {})
+    report = SyncReport()
+    core._note_unavailable_songs(
+        plan, folder, ["vidUnav"], {"vidUnav": "Ghost Song"}, {"vidUnav"}, report
+    )
+    assert report.unavailable and "Ghost Song" in report.unavailable[0]
+    notes = core._read_unavailable_notes(folder)
+    assert "vidUnav" in notes
+
+
+def test_note_unavailable_pruned_when_downloaded(tmp_path, monkeypatch):
+    folder = tmp_path / "Play"
+    folder.mkdir()
+    core._write_unavailable_notes(folder, {"vidNowHave": {"first_seen": "x"}})
+    plan = core.PlaylistPlan("PLp", "Play", "", "update", folder="Play")
+    monkeypatch.setattr(
+        core.engine, "get_local_song_files", lambda n: {"vidNowHave": object()}
+    )
+    report = SyncReport()
+    core._note_unavailable_songs(plan, folder, [], {}, {"vidNowHave"}, report)
+    assert core._read_unavailable_notes(folder) == {}
