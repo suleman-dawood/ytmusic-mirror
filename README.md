@@ -70,8 +70,12 @@ Manage what you've configured:
 ytmusic-mirror status               # show channel, playlists, folder, policies
 ytmusic-mirror channel              # show the configured channel
 ytmusic-mirror channel --clear      # remove the channel
+ytmusic-mirror set-dir "~/Music/MP3s"     # change the master folder
 ytmusic-mirror remove "<playlist-url>"   # stop syncing one playlist
 ```
+
+Paths: use an absolute path or `~/...` (note the slash — `~Music/...` is
+invalid and is rejected with a hint).
 
 The config file lives at `%APPDATA%\ytmusic-mirror\config.json` on Windows and
 `~/.config/ytmusic-mirror/config.json` (or `$XDG_CONFIG_HOME`) on Linux. You can

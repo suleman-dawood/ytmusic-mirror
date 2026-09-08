@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 from urllib.parse import urlparse
 
 from . import __version__
-from .config import DEFAULT_CONFIG_PATH, Config, write_default_config
+from .config import DEFAULT_CONFIG_PATH, Config, expand_user_path, write_default_config
 from .core import (
     Logger,
     discover_remote_playlists,
@@ -186,6 +186,19 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_set_dir(args: argparse.Namespace) -> int:
+    cfg, config_path = _load_or_create_config(args)
+    try:
+        new_dir = expand_user_path(args.path)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    cfg.music_dir = new_dir
+    cfg.save(config_path)
+    print(f"Master folder set to: {new_dir}")
+    return 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     config_path = _config_path(args)
     if not config_path.exists():
@@ -280,6 +293,14 @@ def main(argv: Optional[list] = None) -> int:
     p_remove.add_argument("--channel", action="store_true", help="Clear the configured channel")
     p_remove.set_defaults(func=_cmd_remove)
 
+    p_set_dir = sub.add_parser(
+        "set-dir",
+        help="Change the master folder where playlists are synced",
+    )
+    _add_config_arg(p_set_dir)
+    p_set_dir.add_argument("path", help="Absolute path or ~/... (e.g. ~/Music/MP3s)")
+    p_set_dir.set_defaults(func=_cmd_set_dir)
+
     p_status = sub.add_parser("status", help="Show the current configuration")
     _add_config_arg(p_status)
     p_status.set_defaults(func=_cmd_status)
@@ -300,7 +321,14 @@ def main(argv: Optional[list] = None) -> int:
     p_sync.set_defaults(func=_cmd_sync)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

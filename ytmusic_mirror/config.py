@@ -46,8 +46,24 @@ DEFAULTS = {
 }
 
 
+def expand_user_path(value: str) -> Path:
+    """Expand env vars/~ and resolve to an absolute path.
+
+    Raises ValueError when a value begins with '~' that cannot be expanded,
+    which usually means the user typed `~Music/...` instead of `~/Music/...`.
+    """
+    expanded = os.path.expandvars(os.path.expanduser(value))
+    if expanded.startswith("~"):
+        raise ValueError(
+            f"Path '{value}' starts with '~' but is not a valid home path. "
+            "Did you mean '~/' + the rest (e.g. '~/Music/MP3s')? Use an "
+            "absolute path or '~/...'."
+        )
+    return Path(expanded).resolve()
+
+
 def _expand_path(value: str) -> Path:
-    return Path(os.path.expandvars(os.path.expanduser(value))).resolve()
+    return expand_user_path(value)
 
 
 @dataclass

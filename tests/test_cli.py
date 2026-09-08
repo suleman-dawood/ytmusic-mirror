@@ -96,3 +96,28 @@ def test_normalize_channel_rejects_bad():
         _normalize_channel("just some words")
     with pytest.raises(ValueError):
         _normalize_channel("https://www.youtube.com/playlist?list=PLabc")
+
+
+def test_set_dir_updates_path_keeps_channel(capsys, tmp_path):
+    cfg_file = tmp_path / "cfg.json"
+    run(capsys, "init", "-c", str(cfg_file))
+    run(capsys, "channel", "-c", str(cfg_file), "@me")
+    code, out, _ = run(capsys, "set-dir", "-c", str(cfg_file), str(tmp_path / "new"))
+    assert code == 0
+    cfg = Config.load(cfg_file)
+    assert cfg.music_dir == (tmp_path / "new").resolve()
+    assert cfg.channel_url.endswith("@me")
+
+
+def test_set_dir_rejects_tilde_typo(capsys, tmp_path):
+    cfg_file = tmp_path / "cfg.json"
+    run(capsys, "init", "-c", str(cfg_file))
+    code, _, err = run(capsys, "set-dir", "-c", str(cfg_file), "~Music/MP3s")
+    assert code == 1
+    assert "Did you mean" in err
+
+
+def test_init_rejects_tilde_typo(capsys, tmp_path):
+    code, _, err = run(capsys, "init", "-c", str(tmp_path / "c.json"), "--dir", "~Music/MP3s")
+    assert code == 1
+    assert "Did you mean" in err
