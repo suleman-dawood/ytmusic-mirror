@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -13,24 +14,24 @@ def test_windows_config_path_uses_appdata():
     from ytmusic_mirror.config import _platform_config_dir
 
     path = _platform_config_dir("nt", "/Roaming", "", "/home/u")
-    assert path == "/Roaming/ytmusic-mirror/config.json"
+    assert path == os.path.join("/Roaming", "ytmusic-mirror", "config.json")
 
 
 def test_windows_config_path_falls_back_to_home():
     from ytmusic_mirror.config import _platform_config_dir
 
     path = _platform_config_dir("nt", "", "", "/home/u")
-    assert path == "/home/u/ytmusic-mirror/config.json"
+    assert path == os.path.join("/home/u", "ytmusic-mirror", "config.json")
 
 
 def test_linux_xdg_and_default():
     from ytmusic_mirror.config import _platform_config_dir
 
-    assert _platform_config_dir("posix", "", "/xdg", "/home/u") == (
-        "/xdg/ytmusic-mirror/config.json"
+    assert _platform_config_dir("posix", "", "/xdg", "/home/u") == os.path.join(
+        "/xdg", "ytmusic-mirror", "config.json"
     )
-    assert _platform_config_dir("posix", "", "", "/home/u") == (
-        "/home/u/.config/ytmusic-mirror/config.json"
+    assert _platform_config_dir("posix", "", "", "/home/u") == os.path.join(
+        "/home/u", ".config", "ytmusic-mirror", "config.json"
     )
 
 

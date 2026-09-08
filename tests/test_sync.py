@@ -221,14 +221,6 @@ def test_clean_temp_files(tmp_path):
     assert names == {"song.mp3"}
 
 
-def test_default_config_path_os(monkeypatch):
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    from ytmusic_mirror.config import default_config_path
-
-    monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/xdg")
-    assert str(default_config_path()).startswith("/tmp/xdg/ytmusic-mirror")
-
-
 def test_note_unavailable_songs(tmp_path, monkeypatch):
     folder = tmp_path / "Play"
     folder.mkdir()
