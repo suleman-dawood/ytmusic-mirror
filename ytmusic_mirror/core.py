@@ -1,0 +1,551 @@
+"""Core sync engine for ytmusic-mirror.
+
+Responsibilities:
+  * Discover the set of remote public playlists (channel tab + explicit list).
+  * Map local playlist folders to playlists via the downloader's config file.
+  * Create folders for new playlists, rename folders for renames, and archive
+    folders whose playlist disappeared from the account.
+  * Delegate per-song download / reorder / retention to the vendored
+    youtube-music-downloader, then enforce removal semantics: songs removed
+    from a playlist that are still on YouTube are deleted locally, while songs
+    whose video has been delisted are moved into an archive folder.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Dict, List, Optional
+from urllib.parse import parse_qs, urlparse
+
+import yt_dlp
+
+from . import engine
+from .config import CONFIG_FILE_NAME, Config
+
+_VIDEO_ID_LEN = 11
+_PLAYLIST_ID_PREFIX = re.compile(
+    r"^(PL|OLAK5uy_|RD|RDEM|RDCLAK5uy_|LM|LL|FL|UU|PU|TL|VL|OL|LA|EC|PLRD|TLRD)"
+)
+_UNAVAILABLE_TITLES = (
+    "[Private video]",
+    "[Deleted video]",
+    "[Video unavailable]",
+    "(Not available)",
+)
+
+
+@dataclass
+class RemotePlaylist:
+    id: str
+    title: str
+    url: str
+
+
+@dataclass
+class LocalPlaylist:
+    folder: str
+    config_path: Path
+    raw_config: dict
+
+
+@dataclass
+class PlaylistPlan:
+    remote_id: str
+    remote_title: str
+    remote_url: str
+    action: str  # create | update | archive_deleted
+    folder: str = ""
+    new_songs: int = 0
+    removed_songs: int = 0
+    delisted_songs: int = 0
+    rename_to: str = ""
+
+
+@dataclass
+class SyncReport:
+    created: List[str] = field(default_factory=list)
+    updated: List[str] = field(default_factory=list)
+    renamed: List[str] = field(default_factory=list)
+    deleted_playlists: List[str] = field(default_factory=list)
+    archived_playlists: List[str] = field(default_factory=list)
+    removed_songs: List[str] = field(default_factory=list)
+    delisted_songs: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    skipped_playlists: List[str] = field(default_factory=list)
+
+
+class Logger:
+    def __init__(self, out: Callable[[str], None] = print):
+        self._out = out
+
+    def info(self, message: str) -> None:
+        self._out(message)
+
+    def warn(self, message: str) -> None:
+        self._out(f"[warn] {message}")
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+
+
+def playlist_id_from_url(url: str) -> Optional[str]:
+    query = parse_qs(urlparse(url).query)
+    values = query.get("list")
+    if values:
+        return values[0]
+    return None
+
+
+def playlist_url_from_id(playlist_id: str) -> str:
+    return f"https://www.youtube.com/playlist?list={playlist_id}"
+
+
+def _ytdl_base_opts(cfg: Config) -> dict:
+    opts: dict = {
+        "quiet": True,
+        "no_warnings": True,
+        "cookiefile": None if not cfg.cookie_file else str(Path(cfg.cookie_file).expanduser()),
+        "cookiesfrombrowser": None if not cfg.cookies_from_browser else (cfg.cookies_from_browser,),
+    }
+    return opts
+
+
+def _flat_opts(cfg: Config) -> dict:
+    opts = _ytdl_base_opts(cfg)
+    opts.update({"extract_flat": True, "skip_download": True})
+    return opts
+
+
+def _channel_playlists_tab_url(channel_url: str) -> str:
+    url = channel_url.strip()
+    path = urlparse(url).path.rstrip("/")
+    if path.endswith("/playlists"):
+        return url
+    return f"{url.rstrip('/')}/playlists"
+
+
+def enumerate_channel_playlists(channel_url: str, cfg: Config) -> List[RemotePlaylist]:
+    """Return the public playlists listed on a channel's /playlists tab."""
+    url = _channel_playlists_tab_url(channel_url)
+    if not urlparse(url).scheme:
+        url = "https://" + url
+
+    found: List[RemotePlaylist] = []
+    with yt_dlp.YoutubeDL(_flat_opts(cfg)) as ydl:
+        info = ydl.extract_info(url, download=False)
+    for entry in info.get("entries") or []:
+        if not entry or not entry.get("id"):
+            continue
+        playlist_id = str(entry["id"])
+        title = entry.get("title") or playlist_id
+        # Playlist ids from a channel tab are playlist URLs, not watch pages.
+        if not _looks_like_playlist_id(playlist_id):
+            continue
+        found.append(RemotePlaylist(playlist_id, str(title), playlist_url_from_id(playlist_id)))
+    return found
+
+
+def _looks_like_playlist_id(playlist_id: str) -> bool:
+    if _PLAYLIST_ID_PREFIX.match(playlist_id):
+        return True
+    return len(playlist_id) != _VIDEO_ID_LEN
+
+
+def discover_remote_playlists(cfg: Config) -> List[RemotePlaylist]:
+    """Discover remote playlists from the channel tab plus any explicit list."""
+    combined: List[RemotePlaylist] = []
+    seen: set = set()
+
+    if cfg.channel_url:
+        for rp in enumerate_channel_playlists(cfg.channel_url, cfg):
+            if rp.id in seen:
+                continue
+            seen.add(rp.id)
+            combined.append(rp)
+
+    for url in cfg.playlists:
+        url = url.strip()
+        if not url:
+            continue
+        playlist_id = playlist_id_from_url(url)
+        if playlist_id is None:
+            raise ValueError(f"Not a playlist URL (no ?list= param): {url}")
+        if playlist_id in seen:
+            continue
+        title = _fetch_playlist_title(url, cfg)
+        seen.add(playlist_id)
+        combined.append(RemotePlaylist(playlist_id, title, url))
+
+    return combined
+
+
+def _fetch_playlist_title(url: str, cfg: Config) -> str:
+    base = engine.setup_config(_config_for_new_playlist(cfg, url))
+    try:
+        info = engine.get_playlist_info(base)
+        return str(info.get("title") or "")
+    except Exception:
+        return url
+
+
+def _config_for_new_playlist(cfg: Config, url: str) -> dict:
+    base: dict = {"url": url}
+    base.update(cfg.download or {})
+    if cfg.cookies_from_browser and not base.get("cookies_from_browser"):
+        base["cookies_from_browser"] = cfg.cookies_from_browser
+    if cfg.cookie_file and not base.get("cookie_file"):
+        base["cookie_file"] = cfg.cookie_file
+    return base
+
+
+def _remote_entry_ids(config: dict) -> List[str]:
+    """The ordered list of video ids in a remote playlist (best effort)."""
+    try:
+        info = engine.get_playlist_info(config)
+    except Exception:
+        return []
+    ids: List[str] = []
+    for entry in info.get("entries") or []:
+        if entry and entry.get("id"):
+            ids.append(str(entry["id"]))
+    return ids
+
+
+def _probe_video_available(video_id: str, cfg: Config) -> bool:
+    """Return False when the video has been removed/privated/delisted."""
+    opts = _flat_opts(cfg)
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(
+                f"https://www.youtube.com/watch?v={video_id}", download=False
+            )
+        if not info:
+            return False
+        if info.get("channel_id") is None:
+            return False
+        title = str(info.get("title") or "").strip()
+        for marker in _UNAVAILABLE_TITLES:
+            if title.startswith(marker):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+# --------------------------------------------------------------------------- #
+# Local snapshot
+# --------------------------------------------------------------------------- #
+
+
+def snapshot_local_playlists(music_dir: Path) -> Dict[str, LocalPlaylist]:
+    """Map playlist id -> folder for every managed folder under music_dir."""
+    local: Dict[str, LocalPlaylist] = {}
+    if not music_dir.is_dir():
+        return local
+
+    for child in sorted(music_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        if child.name.startswith((".", "_")):
+            continue
+        config_file = child / CONFIG_FILE_NAME
+        if not config_file.is_file():
+            continue
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception as e:
+            raise RuntimeError(f"Invalid config file '{config_file}': {e}") from e
+        playlist_id = playlist_id_from_url(str(raw.get("url") or ""))
+        if playlist_id is None:
+            raise RuntimeError(
+                f"Config file '{config_file}' has an invalid playlist URL; "
+                "fix or remove it before syncing."
+            )
+        if playlist_id in local:
+            raise RuntimeError(
+                f"Duplicate local folders for playlist '{playlist_id}': "
+                f"'{local[playlist_id].folder}' and '{child.name}'."
+            )
+        local[playlist_id] = LocalPlaylist(child.name, config_file, raw)
+    return local
+
+
+# --------------------------------------------------------------------------- #
+# Sync
+# --------------------------------------------------------------------------- #
+
+
+def sync(cfg: Config, dry_run: bool = False, log: Optional[Logger] = None) -> SyncReport:
+    """Mirror the configured remote playlists into the music directory."""
+    log = log or Logger()
+    report = SyncReport()
+
+    cfg.music_dir.mkdir(parents=True, exist_ok=True)
+    previous_cwd = Path.cwd()
+    os.chdir(cfg.music_dir)
+    try:
+        remote = discover_remote_playlists(cfg)
+    except Exception as e:
+        report.errors.append(f"Playlist discovery failed: {e}")
+        os.chdir(previous_cwd)
+        return report
+
+    if not remote and not cfg.channel_url and not cfg.playlists:
+        report.errors.append(
+            "No playlist source configured. Set 'channel_url' or add playlist "
+            "URLs to 'playlists' in the config file."
+        )
+        os.chdir(previous_cwd)
+        return report
+
+    if not remote:
+        log.warn(
+            "No remote playlists found. Existing local folders will be "
+            "archived/deleted according to 'deleted_playlist_policy'."
+        )
+
+    remote_by_id = {rp.id: rp for rp in remote}
+    local = snapshot_local_playlists(cfg.music_dir)
+
+    # Order: keep channel/remote ordering, then handle disappeared folders.
+    for rp in remote:
+        local_pl = local.get(rp.id)
+        folder = local_pl.folder if local_pl else ""
+        action = "update" if local_pl else "create"
+        plan = PlaylistPlan(rp.id, rp.title, rp.url, action, folder=folder)
+        _execute_plan(cfg, plan, dry_run=dry_run, report=report, log=log)
+
+    for playlist_id, local_pl in sorted(local.items()):
+        if playlist_id in remote_by_id:
+            continue
+        plan = PlaylistPlan(
+            remote_id=playlist_id,
+            remote_title=local_pl.folder,
+            remote_url=str(local_pl.raw_config.get("url") or ""),
+            action="archive_deleted",
+            folder=local_pl.folder,
+        )
+        _execute_plan(cfg, plan, dry_run=dry_run, report=report, log=log)
+
+    os.chdir(previous_cwd)
+    return report
+
+
+def _execute_plan(
+    cfg: Config,
+    plan: PlaylistPlan,
+    dry_run: bool,
+    report: SyncReport,
+    log: Logger,
+) -> None:
+    if plan.action == "archive_deleted":
+        _handle_deleted_playlist(cfg, plan, dry_run, report, log)
+        return
+
+    if plan.action == "create":
+        config = engine.setup_config(_config_for_new_playlist(cfg, plan.remote_url))
+        local_files = {}
+    else:
+        config_file = cfg.music_dir / plan.folder / CONFIG_FILE_NAME
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception as e:
+            report.errors.append(f"Playlist '{plan.remote_title}' skipped: {e}")
+            return
+        config = engine.setup_config(raw)
+        _merge_cookies(cfg, config)
+        try:
+            local_files = engine.get_local_song_files(plan.folder)
+        except Exception as e:
+            report.errors.append(f"Playlist '{plan.remote_title}' skipped: {e}")
+            report.skipped_playlists.append(plan.remote_title)
+            return
+
+    expected_folder = engine.sanitize_folder_name(plan.remote_title)
+    if plan.action == "update" and config.get("sync_folder_name", True) and plan.folder != expected_folder:
+        plan.rename_to = expected_folder
+        report.renamed.append(f"{plan.folder} -> {expected_folder}")
+
+    # Fetch remote song ids to compute add/remove deltas.
+    remote_ids = _remote_entry_ids(config)
+    remote_id_set = set(remote_ids)
+
+    orphan_ids = sorted(set(local_files.keys()) - remote_id_set)
+    plan.new_songs = len(remote_id_set - set(local_files.keys()))
+    plan.removed_songs = len(orphan_ids)
+
+    if plan.action == "create":
+        report.created.append(plan.remote_title)
+    else:
+        report.updated.append(plan.remote_title)
+
+    if dry_run:
+        _classify_orphans_dry(cfg, plan, orphan_ids, report)
+        log.info(
+            f"[dry-run] {plan.action}: '{plan.remote_title}'"
+            f" (+{plan.new_songs} new, {plan.removed_songs} to reconcile)"
+            + (f" rename folder to '{plan.rename_to}'" if plan.rename_to else "")
+        )
+        return
+
+    # Reconcile orphaned songs first so the folder mirrors the live playlist,
+    # then let the downloader add new songs and reorder what remains.
+    if orphan_ids:
+        _reconcile_orphans(cfg, plan, orphan_ids, report, log)
+
+    log.info(
+        f"{'Creating' if plan.action == 'create' else 'Updating'} "
+        f"playlist '{plan.remote_title}'... (+{plan.new_songs} new)"
+    )
+    try:
+        engine.generate_playlist(
+            config,
+            update=(plan.action == "update"),
+            current_playlist_name=plan.folder if plan.action == "update" else None,
+        )
+    except Exception as e:
+        report.errors.append(f"Playlist '{plan.remote_title}' failed: {e}")
+
+
+def _merge_cookies(cfg: Config, config: dict) -> None:
+    if not config.get("cookies_from_browser") and cfg.cookies_from_browser:
+        config["cookies_from_browser"] = cfg.cookies_from_browser
+    if not config.get("cookie_file") and cfg.cookie_file:
+        config["cookie_file"] = cfg.cookie_file
+
+
+def _handle_deleted_playlist(
+    cfg: Config,
+    plan: PlaylistPlan,
+    dry_run: bool,
+    report: SyncReport,
+    log: Logger,
+) -> None:
+    policy = cfg.deleted_playlist_policy
+    source = cfg.music_dir / plan.folder
+    if not source.is_dir():
+        return
+    if policy == "keep":
+        log.info(f"Playlist '{plan.folder}' no longer in account; keeping local folder.")
+        return
+    if policy == "delete":
+        report.deleted_playlists.append(plan.folder)
+        if dry_run:
+            log.info(f"[dry-run] delete folder '{plan.folder}'")
+            return
+        log.info(f"Deleting folder '{plan.folder}' (playlist removed from account)...")
+        try:
+            shutil.rmtree(source)
+        except Exception as e:
+            report.errors.append(f"Could not delete '{plan.folder}': {e}")
+        return
+    # archive (default)
+    report.archived_playlists.append(plan.folder)
+    dest = cfg.effective_archive_dir / "deleted" / plan.remote_id
+    if dry_run:
+        log.info(f"[dry-run] archive folder '{plan.folder}' -> {dest}")
+        return
+    log.info(f"Archiving folder '{plan.folder}' (playlist removed from account)...")
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(dest))
+    except Exception as e:
+        report.errors.append(f"Could not archive '{plan.folder}': {e}")
+
+
+def _classify_orphans_dry(
+    cfg: Config, plan: PlaylistPlan, orphan_ids: List[str], report: SyncReport
+) -> None:
+    for video_id in orphan_ids:
+        if cfg.orphan_policy == "archive":
+            report.delisted_songs.append(f"{plan.remote_title}: {video_id}")
+        elif cfg.orphan_policy == "delete":
+            report.removed_songs.append(f"{plan.remote_title}: {video_id}")
+        else:  # smart
+            if _probe_video_available(video_id, cfg):
+                report.removed_songs.append(f"{plan.remote_title}: {video_id}")
+            else:
+                report.delisted_songs.append(f"{plan.remote_title}: {video_id}")
+
+
+def _reconcile_orphans(
+    cfg: Config,
+    plan: PlaylistPlan,
+    orphan_ids: List[str],
+    report: SyncReport,
+    log: Logger,
+) -> None:
+    """Delete user-removed songs; archive songs whose video has been delisted."""
+    try:
+        local_files = engine.get_local_song_files(plan.folder)
+    except Exception as e:
+        report.errors.append(f"Could not scan '{plan.folder}' for cleanup: {e}")
+        return
+
+    for video_id in orphan_ids:
+        info = local_files.get(video_id)
+        if info is None:
+            continue
+        file_path = cfg.music_dir / plan.folder / info.file_name
+
+        if cfg.orphan_policy == "archive":
+            available = False
+            delisted = True
+        elif cfg.orphan_policy == "delete":
+            available = True
+            delisted = False
+        else:  # smart
+            available = _probe_video_available(video_id, cfg)
+            delisted = not available
+
+        if available and not delisted:
+            report.removed_songs.append(f"{plan.remote_title}: {info.name}")
+            log.info(f"Deleting '{info.name}' (removed from playlist, still on YouTube)...")
+            try:
+                file_path.unlink()
+            except Exception as e:
+                report.errors.append(f"Could not delete '{file_path}': {e}")
+        elif delisted:
+            report.delisted_songs.append(f"{plan.remote_title}: {info.name}")
+            dest = cfg.effective_archive_dir / "delisted" / plan.remote_id
+            dest.mkdir(parents=True, exist_ok=True)
+            log.info(f"Archiving '{info.name}' (video no longer on YouTube)...")
+            try:
+                shutil.move(str(file_path), str(dest / info.file_name))
+            except Exception as e:
+                report.errors.append(f"Could not archive '{file_path}': {e}")
+
+
+def pretty_report(report: SyncReport) -> str:
+    lines = []
+    if report.created:
+        lines.append(f"Created: {', '.join(report.created)}")
+    if report.renamed:
+        lines.append(f"Renamed: {', '.join(report.renamed)}")
+    if report.updated:
+        lines.append(f"Updated: {', '.join(report.updated)}")
+    if report.archived_playlists:
+        lines.append(f"Archived playlists: {', '.join(report.archived_playlists)}")
+    if report.deleted_playlists:
+        lines.append(f"Deleted playlists: {', '.join(report.deleted_playlists)}")
+    if report.removed_songs:
+        lines.append(f"Songs removed from playlists (deleted locally):")
+        lines.extend(f"  - {x}" for x in report.removed_songs)
+    if report.delisted_songs:
+        lines.append(f"Songs delisted on YouTube (archived):")
+        lines.extend(f"  - {x}" for x in report.delisted_songs)
+    if report.skipped_playlists:
+        lines.append(f"Skipped: {', '.join(report.skipped_playlists)}")
+    if report.errors:
+        lines.append("Errors:")
+        lines.extend(f"  ! {x}" for x in report.errors)
+    return "\n".join(lines)
