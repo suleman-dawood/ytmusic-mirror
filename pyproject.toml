@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pytest-cov"]
 
 [project.scripts]
 ytmusic-mirror = "ytmusic_mirror.cli:main"
@@ -37,3 +37,6 @@ packages = ["ytmusic_mirror"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "live: network tests; run with YT_MIRROR_LIVE=1",
+]

@@ -131,9 +131,15 @@ ytmusic-mirror sync --nolog    # quiet: no progress lines, summary + errors only
 ## Tests
 
 ```sh
-pip install -e .[dev]
-pytest
+pip install -e ".[dev]"
+pytest                              # offline suite (99% line coverage)
+pytest --cov=ytmusic_mirror         # with coverage report
+YT_MIRROR_LIVE=1 pytest -m live     # optional real-download tests
 ```
+
+The offline suite has no network requirements and runs in CI on Linux and
+Windows across Python 3.10-3.13 (`.github/workflows/ci.yml`). Real downloads
+against YouTube are covered by the opt-in `live` tests.
 
 ## License
 

@@ -333,7 +333,7 @@ def tag_new_file(
     elif info.get("album"):
         album = str(info["album"])
 
-    tags = ID3(path)
+    tags = ID3()
     if include.get("title"):
         tags.add(TIT2(encoding=3, text=title))
     if include.get("artist") and artist:
@@ -360,7 +360,7 @@ def tag_new_file(
                 tags.add(
                     APIC(encoding=3, mime="image/jpeg", type=3, desc="Front cover", data=data)
                 )
-    tags.save(v2_version=3)
+    tags.save(path, v2_version=3)
 
 
 # --------------------------------------------------------------------------- #
