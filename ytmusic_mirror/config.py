@@ -14,21 +14,35 @@ ARCHIVE_DIR_NAME = "_Archive"
 DEFAULT_MUSIC_DIR = "~/Music/MP3s"
 
 
+def _platform_config_dir(os_name: str, appdata: str, xdg: str, home: str) -> str:
+    """Compute the OS config directory as a plain path string.
+
+    Split out so the branch logic is unit-testable without needing a real
+    Windows host (pathlib picks its flavour from os.name at runtime).
+    """
+    if os_name == "nt":
+        base = appdata or home
+    elif xdg:
+        base = xdg
+    else:
+        base = os.path.join(home, ".config")
+    return os.path.join(base, "ytmusic-mirror", "config.json")
+
+
 def default_config_path() -> Path:
     """OS-aware location for the config file.
 
     Windows: %APPDATA%\\ytmusic-mirror\\config.json
     Linux/macOS: $XDG_CONFIG_HOME/ytmusic-mirror/config.json (or ~/.config)
     """
-    if os.name == "nt":
-        base = os.environ.get("APPDATA")
-        if base:
-            return Path(base) / "ytmusic-mirror" / "config.json"
-        return Path.home() / "ytmusic-mirror" / "config.json"
-    base = os.environ.get("XDG_CONFIG_HOME")
-    if base:
-        return Path(base) / "ytmusic-mirror" / "config.json"
-    return Path.home() / ".config" / "ytmusic-mirror" / "config.json"
+    return Path(
+        _platform_config_dir(
+            os.name,
+            os.environ.get("APPDATA") or "",
+            os.environ.get("XDG_CONFIG_HOME") or "",
+            str(Path.home()),
+        )
+    )
 
 
 DEFAULT_CONFIG_PATH = default_config_path()
@@ -50,16 +64,26 @@ DEFAULTS = {
 def expand_user_path(value: str) -> Path:
     """Expand env vars/~ and resolve to an absolute path.
 
-    Raises ValueError when a value begins with '~' that cannot be expanded,
-    which usually means the user typed `~Music/...` instead of `~/Music/...`.
+    Raises ValueError when a value begins with '~' but is not a plain home
+    reference (`~`, `~/...` or `~\\...`), which usually means the user typed
+    `~Music/...` instead of `~/Music/...`. The check is done before
+    os.path.expanduser so it behaves the same on Windows and Linux.
     """
-    expanded = os.path.expandvars(os.path.expanduser(value))
+    expanded = os.path.expandvars(value)
     if expanded.startswith("~"):
-        raise ValueError(
-            f"Path '{value}' starts with '~' but is not a valid home path. "
-            "Did you mean '~/' + the rest (e.g. '~/Music/MP3s')? Use an "
-            "absolute path or '~/...'."
-        )
+        rest = expanded[1:]
+        if rest and not (rest.startswith("/") or rest.startswith(os.sep)):
+            raise ValueError(
+                f"Path '{value}' starts with '~' but is not a valid home path. "
+                "Did you mean '~/' + the rest (e.g. '~/Music/MP3s')? Use an "
+                "absolute path or '~/...'."
+            )
+        expanded = os.path.expanduser(expanded)
+        if expanded.startswith("~"):
+            raise ValueError(
+                f"Path '{value}' could not be expanded to a home directory. "
+                "Use an absolute path or '~/...'."
+            )
     return Path(expanded).resolve()
 
 

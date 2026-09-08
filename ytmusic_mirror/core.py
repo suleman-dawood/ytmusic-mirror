@@ -5,10 +5,10 @@ Responsibilities:
   * Map local playlist folders to playlists via the downloader's config file.
   * Create folders for new playlists, rename folders for renames, and archive
     folders whose playlist disappeared from the account.
-  * Delegate per-song download / reorder / retention to the vendored
-    youtube-music-downloader, then enforce removal semantics: songs removed
-    from a playlist that are still on YouTube are deleted locally, while songs
-    whose video has been delisted are moved into an archive folder.
+  * Delegate per-song download / reorder / retention to our native downloader
+    module, then enforce removal semantics: songs removed from a playlist that
+    are still on YouTube are deleted locally, while songs whose video has been
+    delisted are moved into an archive folder.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 
-from . import engine
+from . import downloader
 from .config import CONFIG_FILE_NAME, Config
 
 _VIDEO_ID_LEN = 11
@@ -80,6 +80,7 @@ class SyncReport:
     removed_songs: List[str] = field(default_factory=list)
     delisted_songs: List[str] = field(default_factory=list)
     unavailable: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     skipped_playlists: List[str] = field(default_factory=list)
 
@@ -197,55 +198,21 @@ def discover_remote_playlists(cfg: Config) -> List[RemotePlaylist]:
 
 
 def _fetch_playlist_title(url: str, cfg: Config) -> str:
-    base = engine.setup_config(_config_for_new_playlist(cfg, url))
+    settings = downloader.new_settings(cfg, url)
     try:
-        info = engine.get_playlist_info(base)
-        return str(info.get("title") or "")
+        return downloader.fetch_playlist(url, settings).get("title") or url
     except Exception:
         return url
 
 
-def _config_for_new_playlist(cfg: Config, url: str) -> dict:
-    base: dict = {"url": url}
-    base.update(cfg.download or {})
-    if cfg.cookies_from_browser and not base.get("cookies_from_browser"):
-        base["cookies_from_browser"] = cfg.cookies_from_browser
-    if cfg.cookie_file and not base.get("cookie_file"):
-        base["cookie_file"] = cfg.cookie_file
-    if cfg.remote_components and not base.get("remote_components"):
-        base["remote_components"] = list(cfg.remote_components)
-    return base
-
-
-def _entry_available(entry: dict) -> bool:
-    """Best-effort check of whether a listed entry is actually playable."""
-    if entry.get("channel_id") is None:
-        return False
-    title = str(entry.get("title") or "").strip()
-    for marker in _UNAVAILABLE_TITLES:
-        if title.startswith(marker):
-            return False
-    return True
-
-
-def _remote_entries(config: dict) -> List[dict]:
+def _remote_entries(cfg: Config, url: str) -> List[dict]:
     """Fetch a remote playlist once, returning {id,title,available} dicts."""
+    settings = downloader.new_settings(cfg, url)
     try:
-        info = engine.get_playlist_info(config)
+        data = downloader.fetch_playlist(url, settings)
     except Exception:
         return []
-    entries = []
-    for entry in info.get("entries") or []:
-        if not entry or not entry.get("id"):
-            continue
-        entries.append(
-            {
-                "id": str(entry["id"]),
-                "title": str(entry.get("title") or ""),
-                "available": _entry_available(entry),
-            }
-        )
-    return entries
+    return data.get("entries") or []
 
 
 def _read_unavailable_notes(folder: Path) -> Dict[str, dict]:
@@ -426,8 +393,15 @@ def _execute_plan(
         _handle_deleted_playlist(cfg, plan, dry_run, report, log)
         return
 
+    expected_folder = downloader.sanitize_name(plan.remote_title)
+    if plan.action == "update" and plan.folder != expected_folder:
+        plan.rename_to = expected_folder
+        report.renamed.append(f"{plan.folder} -> {expected_folder}")
+
+    # Load/create our own per-playlist settings (identity + resume state).
     if plan.action == "create":
-        config = engine.setup_config(_config_for_new_playlist(cfg, plan.remote_url))
+        settings = downloader.new_settings(cfg, plan.remote_url)
+        folder_abs = cfg.music_dir / expected_folder
         local_files = {}
     else:
         config_file = cfg.music_dir / plan.folder / CONFIG_FILE_NAME
@@ -437,25 +411,20 @@ def _execute_plan(
         except Exception as e:
             report.errors.append(f"Playlist '{plan.remote_title}' skipped: {e}")
             return
-        config = engine.setup_config(raw)
-        _merge_cookies(cfg, config)
+        settings = downloader.settings_from_config(raw)
+        settings["url"] = plan.remote_url
+        _merge_cookies(cfg, settings)
+        folder_abs = cfg.music_dir / plan.folder
         try:
-            local_files = engine.get_local_song_files(plan.folder)
+            local_files = downloader.scan_playlist_folder(folder_abs)
         except Exception as e:
             report.errors.append(f"Playlist '{plan.remote_title}' skipped: {e}")
             report.skipped_playlists.append(plan.remote_title)
             return
 
-    expected_folder = engine.sanitize_folder_name(plan.remote_title)
-    if plan.action == "update" and config.get("sync_folder_name", True) and plan.folder != expected_folder:
-        plan.rename_to = expected_folder
-        report.renamed.append(f"{plan.folder} -> {expected_folder}")
-    work_folder = plan.folder if plan.action == "update" else expected_folder
-    folder_abs = cfg.music_dir / work_folder
-
     # Fetch remote song ids to compute add/remove deltas. Entries that are
     # listed but unavailable are tracked and never counted as "new" forever.
-    entries = _remote_entries(config)
+    entries = _remote_entries(cfg, plan.remote_url)
     remote_id_set = {e["id"] for e in entries}
     unavailable_ids = {e["id"] for e in entries if not e["available"]}
     entry_titles = {e["id"]: e["title"] for e in entries}
@@ -485,6 +454,28 @@ def _execute_plan(
         log.info(message)
         return
 
+    # Folder-level changes (create / rename) and the per-playlist config file.
+    if plan.action == "create":
+        folder_abs.mkdir(parents=True, exist_ok=True)
+    elif plan.rename_to:
+        old_abs = cfg.music_dir / plan.folder
+        try:
+            old_abs.rename(cfg.music_dir / expected_folder)
+            folder_abs = cfg.music_dir / expected_folder
+            plan.folder = expected_folder
+        except OSError as e:
+            report.errors.append(f"Could not rename '{plan.folder}': {e}")
+            return
+        # Refresh the album tag so it follows the renamed playlist.
+        include = settings.get("include_metadata", {})
+        if include.get("album") and settings.get("use_playlist_name"):
+            for song in downloader.scan_playlist_folder(folder_abs).values():
+                try:
+                    downloader.update_album_tag(song.file_path, plan.remote_title)
+                except Exception as e:
+                    report.warnings.append(f"Could not retag '{song.file_name}': {e}")
+    downloader.write_playlist_config(folder_abs, settings)
+
     # Reconcile orphaned songs first so the folder mirrors the live playlist,
     # then let the downloader add new songs and reorder what remains.
     if orphan_ids:
@@ -496,12 +487,17 @@ def _execute_plan(
     )
     try:
         _clean_temp_files(folder_abs)
-        engine.generate_playlist(
-            config,
-            update=(plan.action == "update"),
-            current_playlist_name=plan.folder if plan.action == "update" else None,
+        result = downloader.sync_playlist(
+            folder_abs,
+            plan.remote_title,
+            entries,
+            settings,
+            log=lambda m: log.info(f"{prefix}{m}"),
         )
-        log.info(f"{prefix}Finished '{plan.remote_title}'.")
+        for message in result["failed"]:
+            report.warnings.append(f"{plan.remote_title}: {message}")
+        log.info(f"{prefix}Finished '{plan.remote_title}' "
+                 f"(+{result['added']} new, {len(result['failed'])} failed).")
     except Exception as e:
         report.errors.append(f"Playlist '{plan.remote_title}' failed: {e}")
 
@@ -544,7 +540,7 @@ def _note_unavailable_songs(
             changed = True
     # Prune: entry downloaded, no longer listed, or available again.
     try:
-        present = set(engine.get_local_song_files(plan.folder).keys())
+        present = set(downloader.scan_playlist_folder(folder_abs).keys())
     except Exception:
         present = set()
     for video_id in list(notes):
@@ -644,8 +640,9 @@ def _reconcile_orphans(
     log: Logger,
 ) -> None:
     """Delete user-removed songs; archive songs whose video has been delisted."""
+    folder_abs = cfg.music_dir / plan.folder
     try:
-        local_files = engine.get_local_song_files(plan.folder)
+        local_files = downloader.scan_playlist_folder(folder_abs)
     except Exception as e:
         report.errors.append(f"Could not scan '{plan.folder}' for cleanup: {e}")
         return
@@ -654,7 +651,8 @@ def _reconcile_orphans(
         info = local_files.get(video_id)
         if info is None:
             continue
-        file_path = cfg.music_dir / plan.folder / info.file_name
+        file_path = info.file_path
+        file_name = info.file_name
 
         if cfg.orphan_policy == "archive":
             available = False
@@ -667,19 +665,19 @@ def _reconcile_orphans(
             delisted = not available
 
         if available and not delisted:
-            report.removed_songs.append(f"{plan.remote_title}: {info.name}")
-            log.info(f"Deleting '{info.name}' (removed from playlist, still on YouTube)...")
+            report.removed_songs.append(f"{plan.remote_title}: {file_name}")
+            log.info(f"Deleting '{file_name}' (removed from playlist, still on YouTube)...")
             try:
                 file_path.unlink()
             except Exception as e:
                 report.errors.append(f"Could not delete '{file_path}': {e}")
         elif delisted:
-            report.delisted_songs.append(f"{plan.remote_title}: {info.name}")
+            report.delisted_songs.append(f"{plan.remote_title}: {file_name}")
             dest = cfg.effective_archive_dir / "delisted" / plan.remote_id
             dest.mkdir(parents=True, exist_ok=True)
-            log.info(f"Archiving '{info.name}' (video no longer on YouTube)...")
+            log.info(f"Archiving '{file_name}' (video no longer on YouTube)...")
             try:
-                shutil.move(str(file_path), str(dest / info.file_name))
+                shutil.move(str(file_path), str(dest / file_name))
             except Exception as e:
                 report.errors.append(f"Could not archive '{file_path}': {e}")
 
@@ -707,6 +705,9 @@ def pretty_report(report: SyncReport) -> str:
         lines.append(f"Songs listed as unavailable (recorded, not downloaded) ({len(report.unavailable)}):")
         lines.extend(f"  - {x}" for x in report.unavailable)
     _section(lines, "Skipped playlists", report.skipped_playlists)
+    if report.warnings:
+        lines.append("Warnings:")
+        lines.extend(f"  - {x}" for x in report.warnings)
     if report.errors:
         lines.append("Errors:")
         lines.extend(f"  ! {x}" for x in report.errors)

@@ -79,7 +79,8 @@ ytmusic-mirror remove "<playlist-url>"   # stop syncing one playlist
 ```
 
 Paths: use an absolute path or `~/...` (note the slash — `~Music/...` is
-invalid and is rejected with a hint).
+invalid and is rejected with a hint). Only `~`, `~/` and `~\` are treated as
+home references; other `~user/...` forms are not supported.
 
 ### yt-dlp "Signature solving failed" / EJS warnings
 
@@ -131,15 +132,25 @@ ytmusic-mirror sync --nolog    # quiet: no progress lines, summary + errors only
 ## Tests
 
 ```sh
-pip install -e .[dev]
-pytest
+pip install -e ".[dev]"
+pytest                              # offline suite (99% line coverage)
+pytest --cov=ytmusic_mirror         # with coverage report
+YT_MIRROR_LIVE=1 pytest -m live     # optional real-download tests
 ```
+
+The offline suite has no network requirements and runs in CI on Linux and
+Windows across Python 3.10-3.13 (`.github/workflows/ci.yml`). Real downloads
+against YouTube are covered by the opt-in `live` tests.
 
 ## License
 
-MIT. Contains a vendored copy of
-[youtube_music_playlist_downloader](https://github.com/onnowhere/youtube_music_playlist_downloader)
-(c) 2022 onnowhere, MIT — see `ytmusic_mirror/vendor/UPSTREAM_LICENSE.txt`.
+MIT.
+
+ytmusic-mirror is a self-contained tool built directly on the open libraries
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) and
+[mutagen](https://github.com/quodlibet/mutagen) — it has no dependency on any
+third-party downloader application, so upstream changes to other projects
+cannot break it.
 
 For personal archiving only. Respect YouTube's Terms of Service and applicable
 copyright law.
