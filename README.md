@@ -137,9 +137,13 @@ pytest
 
 ## License
 
-MIT. Contains a vendored copy of
-[youtube_music_playlist_downloader](https://github.com/onnowhere/youtube_music_playlist_downloader)
-(c) 2022 onnowhere, MIT — see `ytmusic_mirror/vendor/UPSTREAM_LICENSE.txt`.
+MIT.
+
+ytmusic-mirror is a self-contained tool built directly on the open libraries
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) and
+[mutagen](https://github.com/quodlibet/mutagen) — it has no dependency on any
+third-party downloader application, so upstream changes to other projects
+cannot break it.
 
 For personal archiving only. Respect YouTube's Terms of Service and applicable
 copyright law.

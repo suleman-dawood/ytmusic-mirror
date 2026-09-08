@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import types
 from pathlib import Path
 
 import pytest
@@ -52,15 +51,15 @@ def write_playlist_folder(root: Path, title: str, playlist_id: str) -> Path:
 
 
 class FakeSongInfo:
-    def __init__(self, video_id: str, file_name: str):
+    def __init__(self, video_id: str, file_name: str, folder=None):
         self.video_id = video_id
         self.file_name = file_name
-        self.name = file_name
+        self.file_path = Path(folder) / file_name if folder else Path(file_name)
 
 
-def fake_local_files(song_ids):
+def fake_local_files(song_ids, folder=None):
     return {
-        vid: FakeSongInfo(vid, f"{i + 1}. Song-{vid}.mp3")
+        vid: FakeSongInfo(vid, f"{i + 1}. Song-{vid}.mp3", folder)
         for i, vid in enumerate(song_ids)
     }
 
@@ -137,10 +136,10 @@ def test_reconcile_orphans_smart(monkeypatch, tmp_path):
     folder = write_playlist_folder(tmp_path, "Play", "PLp")
     still_up = "video_still_up"
     delisted = "video_delisted"
-    files = fake_local_files([still_up, delisted])
+    files = fake_local_files([still_up, delisted], folder)
     for info in files.values():
-        (folder / info.file_name).write_bytes(b"")
-    monkeypatch.setattr(core.engine, "get_local_song_files", lambda name: files)
+        info.file_path.write_bytes(b"")
+    monkeypatch.setattr(core.downloader, "scan_playlist_folder", lambda f: files)
     monkeypatch.setattr(core, "_probe_video_available", lambda vid, cfg: vid == still_up)
 
     report = SyncReport()
@@ -149,7 +148,7 @@ def test_reconcile_orphans_smart(monkeypatch, tmp_path):
 
     assert report.removed_songs and any(still_up in s for s in report.removed_songs)
     assert report.delisted_songs and any(delisted in s for s in report.delisted_songs)
-    assert not (folder / files[still_up].file_name).exists()
+    assert not files[still_up].file_path.exists()
     archived = cfg.effective_archive_dir / "delisted" / "PLp" / files[delisted].file_name
     assert archived.exists()
 
@@ -165,28 +164,20 @@ def test_sync_creates_and_updates(monkeypatch, tmp_path):
     write_playlist_folder(root, "Old Title", "PLkeep")
 
     calls = []
-    orig = types.SimpleNamespace()
 
-    def fake_get_playlist_info(config):
-        pid = playlist_id_from_url(config["url"])
-        return {"title": {"PLnew": "New Playlist", "PLkeep": "Old Title"}[pid], "entries": []}
-
-    def fake_generate(config, update=False, current_playlist_name=None, force_update=False, regenerate_metadata=False):
-        calls.append((playlist_id_from_url(config["url"]), update, current_playlist_name))
+    def fake_sync(folder, playlist_title, entries, settings, log=None):
+        pid = playlist_id_from_url(settings["url"])
+        calls.append((pid, folder, playlist_title))
+        return {"added": 0, "failed": [], "renamed": 0}
 
     monkeypatch.setattr(core, "discover_remote_playlists", lambda cfg: remote)
-    monkeypatch.setattr(core.engine, "get_playlist_info", fake_get_playlist_info)
-    monkeypatch.setattr(core.engine, "generate_playlist", fake_generate)
-    monkeypatch.setattr(core, "_remote_entries", lambda config: [])
-    monkeypatch.setattr(core.engine, "get_local_song_files", lambda name: {})
+    monkeypatch.setattr(core.downloader, "sync_playlist", fake_sync)
+    monkeypatch.setattr(core, "_remote_entries", lambda cfg, url: [])
 
     report = sync(cfg)
-    assert "PLnew" in [c[0] for c in calls]
-    assert "PLkeep" in [c[0] for c in calls]
-    gen = {c[0]: c for c in calls}
-    assert gen["PLnew"][1] is False  # update=False for brand new playlist
-    assert gen["PLkeep"][1] is True
-    assert gen["PLkeep"][2] == "Old Title"
+    assert [c[0] for c in calls] == ["PLnew", "PLkeep"]
+    assert (root / "New Playlist").is_dir()  # created + config written
+    assert (root / "New Playlist" / CONFIG_FILE_NAME).is_file()
     assert not report.errors
 
 
@@ -242,7 +233,7 @@ def test_note_unavailable_songs(tmp_path, monkeypatch):
     folder = tmp_path / "Play"
     folder.mkdir()
     plan = core.PlaylistPlan("PLp", "Play", "", "update", folder="Play")
-    monkeypatch.setattr(core.engine, "get_local_song_files", lambda n: {})
+    monkeypatch.setattr(core.downloader, "scan_playlist_folder", lambda f: {})
     report = SyncReport()
     core._note_unavailable_songs(
         plan, folder, ["vidUnav"], {"vidUnav": "Ghost Song"}, {"vidUnav"}, report
@@ -258,7 +249,7 @@ def test_note_unavailable_pruned_when_downloaded(tmp_path, monkeypatch):
     core._write_unavailable_notes(folder, {"vidNowHave": {"first_seen": "x"}})
     plan = core.PlaylistPlan("PLp", "Play", "", "update", folder="Play")
     monkeypatch.setattr(
-        core.engine, "get_local_song_files", lambda n: {"vidNowHave": object()}
+        core.downloader, "scan_playlist_folder", lambda f: {"vidNowHave": object()}
     )
     report = SyncReport()
     core._note_unavailable_songs(plan, folder, [], {}, {"vidNowHave"}, report)

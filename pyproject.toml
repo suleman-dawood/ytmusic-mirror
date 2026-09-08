@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ytmusic-mirror"
-version = "0.6.0"
+version = "0.7.0"
 description = "Mirror your public YouTube Music playlists to a local folder of MP3 albums"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -33,9 +33,6 @@ ytmusic-mirror = "ytmusic_mirror.cli:main"
 
 [tool.setuptools]
 packages = ["ytmusic_mirror"]
-
-[tool.setuptools.package-data]
-ytmusic_mirror = ["vendor/*.py", "vendor/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
