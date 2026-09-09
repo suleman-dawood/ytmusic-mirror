@@ -491,12 +491,18 @@ async function source(action, url){
   } catch(e){ alert(e.message); }
 }
 async function discover(){
-  const box = el('discoverBox'); box.innerHTML = 'discovering…';
+  const box = el('discoverBox'); box.innerHTML = '';
   try {
     const j = await api('/api/discover', {method:'POST'});
-    box.innerHTML = '<ul>' + (j.remote||[]).map(r =>
-      '<li>' + r.title + ' <button onclick="source(\'add-playlist\', \'' + r.url + '\')">add</button></li>'
-    ).join('') + '</ul>';
+    (j.remote || []).forEach(r => {
+      const li = document.createElement('li');
+      li.textContent = r.title;
+      const b = document.createElement('button');
+      b.textContent = 'add';
+      b.onclick = () => source('add-playlist', r.url);
+      li.appendChild(b);
+      box.appendChild(li);
+    });
   } catch(e){ box.textContent = e.message; }
 }
 async function runSync(){

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -36,6 +37,10 @@ def test_status_and_index(server_and_client):
     _, client, _, music = server_and_client
     page = client.get("/")
     assert page.status_code == 200 and "ytmusic-mirror" in page.text
+    # The inline JS must not contain Python-mangled quote escapes, or the whole
+    # page's script (and every button) silently stops working.
+    script = re.search(r"<script>(.*?)</script>", page.text, re.S).group(1)
+    assert "\\'" not in script
 
     status = client.get("/api/status").json()
     assert status["running"] is False
