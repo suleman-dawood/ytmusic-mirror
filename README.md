@@ -68,9 +68,6 @@ git clone https://github.com/suleman-dawood/ytmusic-mirror
 cd ytmusic-mirror && pip install .
 ```
 
-See [docs/RELEASING.md](docs/RELEASING.md) for how new versions are published to
-each channel.
-
 ## Quick start
 
 Everything is configured from the terminal — no manual file editing.
