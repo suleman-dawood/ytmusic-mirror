@@ -28,7 +28,8 @@ Works on **Windows and Linux**.
   unavailable". It is never miscounted as a new download, and is retried on
   later syncs until it becomes downloadable (then the note is dropped).
 - **Web dashboard (optional)** → a small self-hosted UI to manage sources, run
-  syncs with live logs, schedule them on a cron, and inspect what is on disk.
+  syncs with live logs, schedule them with simple presets (no cron knowledge
+  needed), and inspect what is on disk.
 
 If unsure, run `sync --dry-run` first, or set `orphan_policy` to `archive`
 to never delete anything. Results are printed as a vertical summary list.
@@ -114,8 +115,9 @@ ytmusic-mirror serve -c <path> -d <master-folder>
 
 From the UI you can set your channel, add/remove playlists, discover channel
 playlists, run a sync (with live logs and the summary report), view what is on
-disk, change policies, and enable a cron schedule. Settings are written to the
-same config file the CLI uses, so both work side by side.
+disk, change policies, and schedule automatic syncs with plain-English presets
+(every day/week / every N minutes / custom cron under "advanced"). Settings are
+written to the same config file the CLI uses, so both work side by side.
 
 > The dashboard has **no built-in authentication** - keep it on `localhost` or
 > put a reverse proxy with auth in front before exposing it.
@@ -169,6 +171,8 @@ ytmusic-mirror sync --nolog    # quiet: no progress lines, summary + errors only
 | `archive_dir` | `<music_dir>/_Archive` | Where removed/delisted things go |
 | `deleted_playlist_policy` | `archive` | `archive` \| `delete` \| `keep` |
 | `orphan_policy` | `smart` | `smart` (delete removed, archive delisted) \| `archive` \| `delete` |
+| `scheduler_enabled` | `false` | Auto-run a sync on a schedule (used by the web dashboard) |
+| `scheduler_cron` | `0 0 * * *` | Cron expression when scheduling is enabled |
 | `download` | `{}` | Extra settings for new playlists (codec, naming, ...) |
 
 ## Tests
