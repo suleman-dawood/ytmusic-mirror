@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ytmusic-mirror</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; max-width: 700px; margin: 0 auto;
+         padding: 16px; }
+  h1 { font-size: 1.35rem; margin: 4px 0 2px; }
+  h2 { font-size: 1rem; margin: 0 0 12px; }
+  p  { margin: 0 0 8px; }
+  code { background: #0002; border-radius: 4px; padding: 0 4px; }
+  .pill { display:inline-block; border-radius:999px; padding:2px 10px;
+          font-size:.78rem; background:#1a7; color:#fff; vertical-align:middle; }
+  .pill.off { background:#777; }
+  .pill.busy { background:#b80; }
+  .card { border:1px solid #8885; border-radius:10px; padding:16px;
+          margin:12px 0; }
+  .section { margin: 14px 0 4px; font-weight:600; }
+  .field { margin: 12px 0; display:flex; flex-direction:column; gap:4px; }
+  .field label { font-size:.85rem; }
+  .field .hint { font-size:.78rem; color:#888; margin:0; }
+  input[type=text], select { padding:6px 8px; border:1px solid #8886;
+          border-radius:6px; background:transparent; color:inherit; width:100%; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row input[type=text] { flex:1; }
+  button { padding:6px 12px; border-radius:6px; border:1px solid #8888;
+           background:#00000022; color:inherit; cursor:pointer; white-space:nowrap; }
+  button:hover { background:#00000033; }
+  button.primary { background:#1a7; border-color:#1a7; color:#fff; }
+  button.danger { border-color:#c33a; color:#e55; }
+  button:disabled { opacity:.55; cursor:not-allowed; }
+  ul.list { list-style:none; padding:0; margin:8px 0; }
+  ul.list li { display:flex; align-items:center; justify-content:space-between;
+               gap:10px; padding:6px 8px; border:1px solid #8884;
+               border-radius:6px; margin:6px 0; overflow-wrap:anywhere; }
+  ul.list li button { flex:0 0 auto; }
+  pre, #log { background:#0002; border:1px solid #8884; border-radius:8px;
+              padding:10px; white-space:pre-wrap; font-size:.82rem;
+              max-height:300px; overflow:auto; margin:0; }
+  #report { white-space:pre-wrap; margin-top:8px; }
+  .empty { color:#888; font-style:italic; }
+  .inline { display:inline-flex; align-items:center; gap:6px; }
+  .toggle-row { display:flex; align-items:center; gap:10px; }
+  .muted { color:#888; }
+  #toasts { position:fixed; bottom:12px; left:50%; transform:translateX(-50%);
+            display:flex; flex-direction:column; gap:6px; z-index:10;
+            max-width:90vw; }
+  .toast { background:#1a7; color:#fff; padding:8px 14px; border-radius:8px;
+           font-size:.85rem; box-shadow:0 2px 8px #0006; }
+  .toast.err { background:#c33; }
+</style>
+</head>
+<body>
+<h1>ytmusic-mirror <span class="muted" id="ver"></span>
+  <span class="pill off" id="pill">idle</span></h1>
+<p class="muted" style="margin-top:2px">Mirror your public YouTube Music
+playlists into a local folder of MP3s.</p>
+
+<div id="toasts"></div>
+
+<div class="card">
+  <p><b>Master folder:</b> <code id="infoMusic">…</code></p>
+  <p class="muted" id="infoArchive"></p>
+</div>
+
+<div class="card">
+  <h2>Sources</h2>
+
+  <div class="section">Channel</div>
+  <div class="field">
+    <label for="channelInput">Your YouTube channel (public playlists are discovered)</label>
+    <div class="row">
+      <input type="text" id="channelInput" placeholder="https://www.youtube.com/@YourHandle  or  @YourHandle">
+      <button id="btnChannelSet" class="primary">Set channel</button>
+      <button id="btnChannelClear" class="danger" disabled>Clear</button>
+    </div>
+    <p class="hint" id="chanCurrent">No channel set</p>
+  </div>
+
+  <div class="section">Playlists</div>
+  <div class="field">
+    <label for="playlistInput">Add a specific playlist</label>
+    <div class="row">
+      <input type="text" id="playlistInput" placeholder="https://music.youtube.com/playlist?list=…">
+      <button id="btnPlaylistAdd">Add</button>
+      <button id="btnDiscover">Discover channel playlists</button>
+    </div>
+    <p class="hint">Each playlist becomes its own folder. Adding one is enough —
+      a sync will download it.</p>
+  </div>
+  <ul class="list" id="playlistList"><li class="empty">No explicit playlists yet</li></ul>
+  <div id="discoverBox"></div>
+</div>
+
+<div class="card">
+  <h2>Sync</h2>
+  <div class="row">
+    <label class="inline"><input type="checkbox" id="dryRun"> dry run (preview only)</label>
+    <button id="btnSync" class="primary">Run sync</button>
+    <span class="muted" id="syncNote"></span>
+  </div>
+  <p class="hint">Downloads new songs, renames/creates folders, deletes or
+    archives removed songs, and moves deleted playlists into the archive.
+    Everything resumes if interrupted.</p>
+  <pre id="report" style="display:none"></pre>
+</div>
+
+<div class="card">
+  <h2>Log</h2>
+  <pre id="log">(no output yet — run a sync)</pre>
+</div>
+
+<div class="card">
+  <h2>On disk</h2>
+  <ul class="list" id="localList"></ul>
+</div>
+
+<div class="card">
+  <h2>Settings</h2>
+
+  <div class="section">When a playlist is removed from your account</div>
+  <div class="field">
+    <label for="selDeleted">What happens to its local folder</label>
+    <select id="selDeleted">
+      <option value="archive">Move the whole folder into _Archive</option>
+      <option value="delete">Delete the folder</option>
+      <option value="keep">Keep it untouched</option>
+    </select>
+    <p class="hint">Archive is the safe default — nothing is ever lost.</p>
+  </div>
+
+  <div class="section">When a song disappears from a playlist</div>
+  <div class="field">
+    <label for="selOrphan">What happens to the local file</label>
+    <select id="selOrphan">
+      <option value="smart">smart — delete it, but keep copies YouTube delisted</option>
+      <option value="archive">archive — never delete files</option>
+      <option value="delete">delete — delete files even if the video is gone</option>
+    </select>
+    <p class="hint" id="orphanHint"></p>
+  </div>
+
+  <div class="section">YouTube access</div>
+  <div class="field">
+    <label class="toggle-row"><input type="checkbox" id="chkRemoteComponents">
+      Allow yt-dlp to fetch its JS challenge solver</label>
+    <p class="hint">Fixes “Signature solving failed” / “remote components were
+      skipped” warnings. Needs a JS runtime (Deno/Node) — bundled in Docker.</p>
+  </div>
+
+  <div class="section">Automatic syncs</div>
+  <div class="field">
+    <label class="toggle-row"><input type="checkbox" id="chkSchedule">
+      Run syncs on a schedule</label>
+    <p class="hint">Pick a preset or write a cron expression. A sync then runs
+      automatically while this app is running.</p>
+  </div>
+  <div class="field" id="cronBox" style="display:none">
+    <label for="schedPreset">Preset</label>
+    <select id="schedPreset">
+      <option value="0 2 * * *">Daily at 02:00</option>
+      <option value="0 2 * * 0">Weekly (Sunday 02:00)</option>
+      <option value="0 * * * *">Every hour</option>
+      <option value="*/15 * * * *">Every 15 minutes</option>
+      <option value="custom">Custom cron…</option>
+    </select>
+    <label for="schedCron" style="margin-top:8px">Cron expression
+      (minute hour day month weekday)</label>
+    <input type="text" id="schedCron" value="0 2 * * *"
+           placeholder="e.g. 0 2 * * * = every day at 02:00">
+    <p class="hint" id="nextRun"></p>
+  </div>
+
+  <div class="row" style="margin-top:14px">
+    <button id="btnSaveSettings" class="primary">Save settings</button>
+    <span class="muted" id="settingsNote"></span>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let seq = 0;
+
+function toast(msg, err){
+  const t = document.createElement('div');
+  t.className = 'toast' + (err ? ' err' : '');
+  t.textContent = msg;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(()=> t.remove(), err ? 6000 : 3000);
+}
+async function api(path, opts){
+  opts = opts || {};
+  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+  const r = await fetch(path, Object.assign({}, opts, {headers}));
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || (r.status + ' ' + r.statusText));
+  return j;
+}
+function setPill(state){
+  const p = $('pill');
+  p.classList.remove('off', 'busy');
+  if (state === 'busy'){ p.classList.add('busy'); p.textContent = 'syncing…'; }
+  else { p.classList.add('off'); p.textContent = 'idle'; }
+}
+function logLine(line){
+  const box = $('log');
+  if (box.textContent === '(no output yet — run a sync)') box.textContent = '';
+  box.textContent += line + '\n';
+  box.scrollTop = box.scrollHeight;
+}
+function statusText(s){
+  const cfg = s.config;
+  $('ver').textContent = 'v' + s.version;
+  setPill(s.running ? 'busy' : 'idle');
+  $('infoMusic').textContent = cfg.music_dir;
+  $('infoArchive').textContent = 'Archive: ' + cfg.archive_dir;
+  $('chanCurrent').textContent = cfg.channel_url
+    ? 'Current: ' + cfg.channel_url : 'No channel set';
+  $('btnChannelClear').disabled = !cfg.channel_url;
+  $('selDeleted').value = cfg.deleted_playlist_policy;
+  $('selOrphan').value = cfg.orphan_policy;
+  updateOrphanHint();
+  $('chkRemoteComponents').checked = cfg.remote_components;
+  $('chkSchedule').checked = cfg.scheduler.enabled;
+  if (document.activeElement !== $('schedCron')) $('schedCron').value = cfg.scheduler.cron;
+  $('cronBox').style.display = cfg.scheduler.enabled ? 'block' : 'none';
+  $('nextRun').textContent = cfg.scheduler.enabled
+    ? (cfg.scheduler.next_run ? 'Next run: ' + cfg.scheduler.next_run
+                              : 'Applies when you save settings.')
+    : '';
+  renderPlaylists(cfg.playlists);
+  if (s.last_sync) showReport(s.last_sync.report);
+}
+function renderPlaylists(playlists){
+  const ul = $('playlistList');
+  ul.innerHTML = '';
+  if (!playlists.length){
+    const li = document.createElement('li');
+    li.className = 'empty'; li.textContent = 'No explicit playlists yet';
+    ul.appendChild(li); return;
+  }
+  playlists.forEach(url => {
+    const li = document.createElement('li');
+    const span = document.createElement('span'); span.textContent = url;
+    const b = document.createElement('button');
+    b.className = 'danger'; b.textContent = 'Remove';
+    b.onclick = () => removePlaylist(url);
+    li.appendChild(span); li.appendChild(b);
+    ul.appendChild(li);
+  });
+}
+function showReport(text){
+  const pre = $('report');
+  pre.style.display = 'block';
+  pre.textContent = text || '(empty report)';
+}
+function updateOrphanHint(){
+  const hints = {
+    smart: 'Removes songs you dropped from a playlist, but keeps copies of songs YouTube delisted (video gone) in _Archive so you never lose them.',
+    archive: 'Never deletes anything — removed and delisted songs are kept in _Archive.',
+    delete: 'Deletes local files whenever they leave a playlist, even if the video was removed by YouTube.'
+  };
+  $('orphanHint').textContent = hints[$('selOrphan').value] || '';
+}
+async function withBusy(btn, label, fn){
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = label + '…';
+  try { return await fn(); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+async function setChannel(){
+  const url = $('channelInput').value.trim();
+  if (!url){ toast('Enter a channel URL or @handle first', true); return; }
+  await withBusy($('btnChannelSet'), 'Saving', async ()=>{
+    await api('/api/sources', {method:'POST', body: JSON.stringify({action:'set-channel', url})});
+    $('channelInput').value = '';
+    toast('Channel set');
+    await refresh();
+  });
+}
+async function clearChannel(){
+  if (!confirm('Remove the channel? Playlists already downloaded stay on disk.')) return;
+  await withBusy($('btnChannelClear'), 'Clearing', async ()=>{
+    await api('/api/sources', {method:'POST', body: JSON.stringify({action:'clear-channel'})});
+    toast('Channel cleared');
+    await refresh();
+  });
+}
+async function addPlaylist(){
+  const url = $('playlistInput').value.trim();
+  if (!url){ toast('Enter a playlist URL first', true); return; }
+  await withBusy($('btnPlaylistAdd'), 'Adding', async ()=>{
+    await api('/api/sources', {method:'POST', body: JSON.stringify({action:'add-playlist', url})});
+    $('playlistInput').value = '';
+    toast('Playlist added');
+    await refresh();
+  });
+}
+async function removePlaylist(url){
+  if (!confirm('Stop mirroring this playlist?\n' + url +
+    '\n(Songs removed from it may be deleted or archived on the next sync.)')) return;
+  await api('/api/sources', {method:'POST', body: JSON.stringify({action:'remove-playlist', url})});
+  toast('Playlist removed');
+  await refresh();
+}
+async function discover(){
+  const box = $('discoverBox');
+  box.innerHTML = '<p class="hint">Looking up channel playlists…</p>';
+  await withBusy($('btnDiscover'), 'Discovering', async ()=>{
+    const j = await api('/api/discover', {method:'POST'});
+    box.innerHTML = '';
+    const remote = j.remote || [];
+    if (!remote.length){ box.innerHTML = '<p class="empty">No public playlists found on the channel.</p>'; return; }
+    remote.forEach(r => {
+      const li = document.createElement('li');
+      const wrap = document.createElement('div');
+      const t = document.createElement('span'); t.textContent = r.title;
+      const u = document.createElement('div'); u.className = 'hint'; u.textContent = r.url;
+      wrap.appendChild(t); wrap.appendChild(u);
+      const b = document.createElement('button'); b.textContent = 'Add';
+      b.onclick = async ()=>{
+        await api('/api/sources', {method:'POST', body: JSON.stringify({action:'add-playlist', url:r.url})});
+        toast('Added "' + r.title + '"');
+        b.disabled = true;
+        await refresh();
+      };
+      li.appendChild(wrap); li.appendChild(b);
+      box.appendChild(li);
+    });
+  });
+}
+async function runSync(){
+  const dry = $('dryRun').checked;
+  if (!dry && !confirm('Run a real sync? It downloads new songs and can delete or archive songs removed from your playlists.')) return;
+  const btn = $('btnSync');
+  btn.disabled = true; btn.textContent = 'Syncing…';
+  setPill('busy'); $('syncNote').textContent = 'started — watch the log below';
+  try {
+    await api('/api/sync', {method:'POST', body: JSON.stringify({dry_run: dry})});
+  } catch(e){
+    toast(e.message, true);
+    btn.disabled = false; btn.textContent = 'Run sync'; setPill('idle');
+  }
+}
+async function saveSettings(){
+  await withBusy($('btnSaveSettings'), 'Saving', async ()=>{
+    const s = await api('/api/settings', {method:'PATCH', body: JSON.stringify({
+      orphan_policy: $('selOrphan').value,
+      deleted_playlist_policy: $('selDeleted').value,
+      remote_components: $('chkRemoteComponents').checked,
+      scheduler: {enabled: $('chkSchedule').checked, cron: $('schedCron').value.trim()}
+    })});
+    const sch = s.scheduler || {};
+    if (sch.enabled && sch.next_run) toast('Saved. Next auto sync: ' + sch.next_run);
+    else if (sch.enabled) toast('Saved — schedule enabled');
+    else toast('Settings saved');
+    await refresh();
+  });
+}
+async function refresh(){
+  try {
+    const s = await api('/api/status');
+    statusText(s);
+    const l = await api('/api/local');
+    renderLocal(l);
+  } catch(e){ /* transient */ }
+}
+function renderLocal(l){
+  const ul = $('localList');
+  ul.innerHTML = '';
+  if (!l.folders.length){
+    const li = document.createElement('li'); li.className = 'empty';
+    li.textContent = 'Nothing downloaded yet';
+    ul.appendChild(li); return;
+  }
+  l.folders.forEach(f => {
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    span.textContent = f.name + ' — ' + (f.songs >= 0 ? f.songs + ' songs' : 'unknown')
+                     + (f.config ? '' : ' (no config)');
+    li.appendChild(span);
+    ul.appendChild(li);
+  });
+}
+async function tail(){
+  try {
+    const l = await api('/api/logs?after=' + seq);
+    seq = l.seq;
+    if (l.logs.length) logLine(l.logs.join('\n'));
+    const wasBusy = $('pill').classList.contains('busy');
+    if (wasBusy && !l.running){
+      const btn = $('btnSync');
+      btn.disabled = false; btn.textContent = 'Run sync';
+      $('syncNote').textContent = '';
+      const s = await api('/api/status');
+      setPill('idle'); statusText(s);
+      const errs = (s.last_sync && s.last_sync.errors) || 0;
+      if (errs) toast('Sync finished with ' + errs + ' error(s) — see log', true);
+      else toast('Sync finished');
+      await refresh();
+    }
+  } catch(_){ /* ignore */ }
+}
+
+$('btnChannelSet').addEventListener('click', setChannel);
+$('btnChannelClear').addEventListener('click', clearChannel);
+$('btnPlaylistAdd').addEventListener('click', addPlaylist);
+$('btnDiscover').addEventListener('click', discover);
+$('btnSync').addEventListener('click', runSync);
+$('btnSaveSettings').addEventListener('click', saveSettings);
+$('selOrphan').addEventListener('change', updateOrphanHint);
+$('chkSchedule').addEventListener('change', ()=>{
+  $('cronBox').style.display = $('chkSchedule').checked ? 'block' : 'none';
+});
+$('schedPreset').addEventListener('change', ()=>{
+  const v = $('schedPreset').value;
+  if (v !== 'custom') $('schedCron').value = v;
+});
+
+refresh().catch(e => toast(e.message || String(e), true));
+setInterval(tail, 900);
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

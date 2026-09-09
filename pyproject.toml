@@ -42,6 +42,9 @@ ytmusic-mirror = "ytmusic_mirror.cli:main"
 [tool.setuptools]
 packages = ["ytmusic_mirror"]
 
+[tool.setuptools.package-data]
+ytmusic_mirror = ["ui.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
