@@ -1,0 +1,42 @@
+name: Bug report
+description: Something is broken
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please give enough detail to reproduce.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `ytmusic-mirror --version`
+      placeholder: "0.8.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where are you running it?
+      options:
+        - CLI (pip / source)
+        - Web dashboard (ytmusic-mirror serve)
+        - Docker (GHCR / Docker Hub)
+        - Homebrew
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Paste the command, any error output, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. ytmusic-mirror channel @myhandle
+        2. ytmusic-mirror sync
+        3. ...
