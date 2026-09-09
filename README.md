@@ -27,6 +27,8 @@ Works on **Windows and Linux**.
   `<playlist>/.ytmusic-mirror.json` and shown in the summary as "listed as
   unavailable". It is never miscounted as a new download, and is retried on
   later syncs until it becomes downloadable (then the note is dropped).
+- **Web dashboard (optional)** → a small self-hosted UI to manage sources, run
+  syncs with live logs, schedule them on a cron, and inspect what is on disk.
 
 If unsure, run `sync --dry-run` first, or set `orphan_policy` to `archive`
 to never delete anything. Results are printed as a vertical summary list.
@@ -96,6 +98,46 @@ config (a JS runtime such as Deno or Node must be installed):
 The config file lives at `%APPDATA%\ytmusic-mirror\config.json` on Windows and
 `~/.config/ytmusic-mirror/config.json` (or `$XDG_CONFIG_HOME`) on Linux. You can
 point to another one with `-c <path>` on every command.
+
+## Web dashboard
+
+An optional single-page dashboard for managing the mirror from a browser
+(yubal-style). It is download-manager only - playback is left to your own media
+server pointed at the same music folder.
+
+```sh
+pip install "ytmusic-mirror[web]"
+ytmusic-mirror serve                 # http://localhost:8000
+ytmusic-mirror serve --host 0.0.0.0  # expose to your LAN
+ytmusic-mirror serve -c <path> -d <master-folder>
+```
+
+From the UI you can set your channel, add/remove playlists, discover channel
+playlists, run a sync (with live logs and the summary report), view what is on
+disk, change policies, and enable a cron schedule. Settings are written to the
+same config file the CLI uses, so both work side by side.
+
+> The dashboard has **no built-in authentication** - keep it on `localhost` or
+> put a reverse proxy with auth in front before exposing it.
+
+## Docker
+
+A ready-made image is published to
+`ghcr.io/suleman-dawood/ytmusic-mirror` (see
+[`examples/docker-compose.yml`](examples/docker-compose.yml)). It bundles
+ffmpeg and Deno (for yt-dlp's JS challenge solving).
+
+```sh
+mkdir -p music config
+docker compose -f examples/docker-compose.yml up -d
+# open http://localhost:8000
+```
+
+- `./music` = your MP3 mirror (point your player here)
+- `./config` = config + per-playlist state (persisted)
+- On first boot it creates a default config pointing at `/music`; on every
+  restart it picks up where it left off (safe to kill, syncs resume).
+- `docker pull ghcr.io/suleman-dawood/ytmusic-mirror` for the standalone image.
 
 ## Interrupted or large downloads?
 
