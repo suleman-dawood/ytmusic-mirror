@@ -5,6 +5,11 @@ Each playlist becomes a folder; songs, order and folders all follow your account
 
 Works on **Windows and Linux**.
 
+[![PyPI](https://img.shields.io/pypi/v/ytmusic-mirror?color=ff1a1a&label=PyPI)](https://pypi.org/project/ytmusic-mirror/)
+[![GitHub Release](https://img.shields.io/github/v/release/suleman-dawood/ytmusic-mirror?color=ff1a1a)](https://github.com/suleman-dawood/ytmusic-mirror/releases)
+[![Docker Hub](https://img.shields.io/docker/pulls/sulemandawood/ytmusic-mirror?color=ff1a1a&label=Docker%20Hub)](https://hub.docker.com/u/sulemandawood)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io-ff1a1a)](https://github.com/suleman-dawood/ytmusic-mirror/pkgs/container/ytmusic-mirror)
+
 ```
 ~/Music/MP3s/                    <- your master folder
 ├── Road Trip/
@@ -43,11 +48,28 @@ Everything else is installed automatically with the package.
 
 ## Install
 
+Pick whichever channel suits you:
+
 ```sh
-pip install .
-# or, once on PyPI:
-# pip install ytmusic-mirror
+# Python package (PyPI)
+pip install ytmusic-mirror            # core CLI
+pip install "ytmusic-mirror[web]"     # + web dashboard (fastapi/uvicorn/apscheduler)
+
+# Homebrew (macOS / Linux)
+brew tap suleman-dawood/homebrew-ytmusic
+brew install ytmusic-mirror
+
+# Docker — GHCR or Docker Hub (both self-updating via CI on tags)
+docker run --rm -p 8000:8000 -v ~/Music/MP3s:/music ghcr.io/suleman-dawood/ytmusic-mirror
+docker run --rm -p 8000:8000 -v ~/Music/MP3s:/music sulemandawood/ytmusic-mirror
+
+# From source
+git clone https://github.com/suleman-dawood/ytmusic-mirror
+cd ytmusic-mirror && pip install .
 ```
+
+See [docs/RELEASING.md](docs/RELEASING.md) for how new versions are published to
+each channel.
 
 ## Quick start
 
