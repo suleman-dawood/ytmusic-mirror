@@ -284,7 +284,8 @@ def create_app(server: Server) -> FastAPI:
                 server.cfg.channel_url = ""
             elif action == "add-playlist":
                 url = _normalize_playlist(str(payload.get("url") or ""))
-                server.cfg.playlists.append(url)
+                if url not in server.cfg.playlists:
+                    server.cfg.playlists.append(url)
             elif action == "remove-playlist":
                 server.cfg.playlists = [
                     u for u in server.cfg.playlists if u != str(payload.get("url") or "")

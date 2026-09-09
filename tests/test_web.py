@@ -41,6 +41,11 @@ def test_status_and_index(server_and_client):
     # page's script (and every button) silently stops working.
     script = re.search(r"<script>(.*?)</script>", page.text, re.S).group(1)
     assert "\\'" not in script
+    # Every element the JS references must exist in the page.
+    html = page.text
+    html_ids = set(re.findall(r'id="([^"]+)"', html))
+    refs = set(re.findall(r"\$\('([^']+)'\)", script))
+    assert refs - html_ids == set(), sorted(refs - html_ids)
 
     status = client.get("/api/status").json()
     assert status["running"] is False
@@ -54,6 +59,11 @@ def test_manage_channel_and_playlists(server_and_client):
     assert r.status_code == 200
     assert r.json()["channel_url"] == "https://www.youtube.com/@myhandle"
 
+    r = client.post("/api/sources", json={"action": "add-playlist",
+                                          "url": "https://y/playlist?list=PLx"})
+    assert r.status_code == 200
+    assert r.json()["playlists"] == ["https://y/playlist?list=PLx"]
+    # adding the same playlist again is a no-op (no duplicates)
     r = client.post("/api/sources", json={"action": "add-playlist",
                                           "url": "https://y/playlist?list=PLx"})
     assert r.status_code == 200

@@ -5,206 +5,422 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ytmusic-mirror</title>
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    color-scheme: dark;
+    --bg: #0e0e0e;
+    --panel: #171717;
+    --panel-2: #1f1f1f;
+    --line: #2b2b2b;
+    --text: #f1f1f1;
+    --muted: #a3a3a3;
+    --red: #ff1a1a;
+    --red-hi: #ff4d4d;
+    --green: #19b15c;
+    --radius: 12px;
+    --shadow: 0 6px 18px rgba(0,0,0,.35);
+    --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
   * { box-sizing: border-box; }
-  body { font-family: system-ui, sans-serif; max-width: 700px; margin: 0 auto;
-         padding: 16px; }
-  h1 { font-size: 1.35rem; margin: 4px 0 2px; }
-  h2 { font-size: 1rem; margin: 0 0 12px; }
-  p  { margin: 0 0 8px; }
-  code { background: #0002; border-radius: 4px; padding: 0 4px; }
-  .pill { display:inline-block; border-radius:999px; padding:2px 10px;
-          font-size:.78rem; background:#1a7; color:#fff; vertical-align:middle; }
-  .pill.off { background:#777; }
-  .pill.busy { background:#b80; }
-  .card { border:1px solid #8885; border-radius:10px; padding:16px;
-          margin:12px 0; }
-  .section { margin: 14px 0 4px; font-weight:600; }
-  .field { margin: 12px 0; display:flex; flex-direction:column; gap:4px; }
-  .field label { font-size:.85rem; }
-  .field .hint { font-size:.78rem; color:#888; margin:0; }
-  input[type=text], select { padding:6px 8px; border:1px solid #8886;
-          border-radius:6px; background:transparent; color:inherit; width:100%; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 500px at 80% -10%, rgba(255,0,0,.08), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  /* ---------- header ---------- */
+  header {
+    display: flex; align-items: center; gap: 18px;
+    padding: 14px 22px; flex: 0 0 auto;
+    border-bottom: 1px solid var(--line);
+    background: rgba(23,23,23,.6); backdrop-filter: blur(6px);
+  }
+  .brand { display:flex; align-items:center; gap:10px; }
+  .logo {
+    width: 26px; height: 26px; border-radius: 8px; flex: 0 0 auto;
+    background: linear-gradient(135deg, var(--red), #a30000);
+    display:grid; place-items:center; font-weight:800; color:#fff; font-size:15px;
+  }
+  h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; }
+  .brand small { display:block; color: var(--muted); font-weight:500;
+                 font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  .spacer { flex: 1; }
+  .pill { display:inline-flex; align-items:center; gap:7px; border-radius:999px;
+          padding: 4px 12px; font-size: 12px; font-weight: 600; color: var(--muted);
+          background: var(--panel-2); border:1px solid var(--line); }
+  .pill::before { content:""; width:8px; height:8px; border-radius:50%; background:#555; }
+  .pill.on  { color:#fff; border-color: rgba(255,26,26,.6); background: rgba(255,26,26,.15); }
+  .pill.on::before { background: var(--red); box-shadow:0 0 0 3px rgba(255,26,26,.25); }
+  .meta-path { display:flex; gap:14px; align-items:center; color: var(--muted);
+               font-size: 12px; }
+  .meta-path code { font-family: var(--font-mono); font-size: 12px; color: var(--text); }
+
+  /* ---------- app grid ---------- */
+  .app {
+    flex: 1; min-height: 0;
+    display: grid; grid-template-columns: minmax(340px, 5fr) minmax(420px, 7fr);
+    gap: 16px; padding: 16px 22px 22px;
+  }
+  .col { display:flex; flex-direction:column; gap:16px; min-height:0; }
+  .card {
+    background: var(--panel); border:1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); display:flex; flex-direction:column; min-height:0;
+    overflow:hidden;
+  }
+  .card.grow { flex: 1 1 0; }
+  .card.auto { flex: 0 0 auto; }
+  .card > .head {
+    display:flex; align-items:center; gap:10px; padding: 14px 18px 10px; flex:0 0 auto;
+    border-bottom: 1px solid var(--line);
+  }
+  .card > .head h2 {
+    margin:0; font-size: 12px; font-weight: 700; letter-spacing:.14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .card > .head h2::before { content:""; display:inline-block; width:8px; height:8px;
+    margin-right:10px; border-radius:2px; background: var(--red); }
+  .card > .body { padding: 14px 18px 18px; overflow-y:auto; flex:1; min-height:0; }
+  .scroll { overflow-y:auto; min-height:0; }
+  .card > .body.nopad { padding: 0; }
+
+  /* ---------- fields ---------- */
+  .section-label { font-size: 11px; font-weight:700; letter-spacing:.1em;
+                   text-transform:uppercase; color: var(--muted); margin: 16px 0 8px; }
+  .field { display:flex; flex-direction:column; gap:6px; margin: 10px 0; }
+  .field label { font-size: 12.5px; font-weight:600; }
+  .hint, .muted { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.45; }
+  input[type=text], input[type=time], input[type=number], select {
+    background: var(--panel-2); color: var(--text); border:1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: var(--font-ui);
+    width: 100%;
+  }
+  input:focus, select:focus { outline:none; border-color: var(--red); box-shadow: 0 0 0 2px rgba(255,26,26,.2); }
   .row { display:flex; gap:8px; align-items:center; }
-  .row input[type=text] { flex:1; }
-  button { padding:6px 12px; border-radius:6px; border:1px solid #8888;
-           background:#00000022; color:inherit; cursor:pointer; white-space:nowrap; }
-  button:hover { background:#00000033; }
-  button.primary { background:#1a7; border-color:#1a7; color:#fff; }
-  button.danger { border-color:#c33a; color:#e55; }
-  button:disabled { opacity:.55; cursor:not-allowed; }
-  ul.list { list-style:none; padding:0; margin:8px 0; }
-  ul.list li { display:flex; align-items:center; justify-content:space-between;
-               gap:10px; padding:6px 8px; border:1px solid #8884;
-               border-radius:6px; margin:6px 0; overflow-wrap:anywhere; }
-  ul.list li button { flex:0 0 auto; }
-  pre, #log { background:#0002; border:1px solid #8884; border-radius:8px;
-              padding:10px; white-space:pre-wrap; font-size:.82rem;
-              max-height:300px; overflow:auto; margin:0; }
-  #report { white-space:pre-wrap; margin-top:8px; }
-  .empty { color:#888; font-style:italic; }
-  .inline { display:inline-flex; align-items:center; gap:6px; }
-  .toggle-row { display:flex; align-items:center; gap:10px; }
-  .muted { color:#888; }
-  #toasts { position:fixed; bottom:12px; left:50%; transform:translateX(-50%);
-            display:flex; flex-direction:column; gap:6px; z-index:10;
-            max-width:90vw; }
-  .toast { background:#1a7; color:#fff; padding:8px 14px; border-radius:8px;
-           font-size:.85rem; box-shadow:0 2px 8px #0006; }
-  .toast.err { background:#c33; }
+  .row > *:first-child:not(button):not(label) { flex:1; }
+  .row.grow > input { flex:1; }
+  button {
+    font-family: var(--font-ui); font-size: 13px; font-weight:600; cursor:pointer;
+    padding: 8px 14px; border-radius: 8px; border:1px solid var(--line);
+    background: var(--panel-2); color: var(--text); white-space: nowrap;
+    transition: background .12s, border-color .12s, transform .05s;
+  }
+  button:hover { background:#2a2a2a; }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--red); border-color: var(--red); color:#fff; }
+  button.primary:hover { background: var(--red-hi); border-color: var(--red-hi); }
+  button.ghost { background: transparent; }
+  button.danger { background: transparent; border-color: rgba(255,26,26,.5); color: var(--red-hi); }
+  button.danger:hover { background: rgba(255,26,26,.12); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.link { background:none; border:none; color:var(--muted); padding:4px 8px; font-weight:500; }
+  button.link:hover { color: var(--text); }
+
+  .inline { display:inline-flex; align-items:center; gap:8px; }
+  .toggle { position:relative; width:36px; height:20px; flex:0 0 auto; }
+  .toggle input { opacity:0; width:0; height:0; }
+  .toggle .track { position:absolute; inset:0; border-radius:999px;
+                   background:#3a3a3a; transition:background .15s; }
+  .toggle .track::after { content:""; position:absolute; top:2px; left:2px; width:16px;
+                   height:16px; border-radius:50%; background:#fff; transition:transform .15s; }
+  .toggle input:checked + .track { background: var(--red); }
+  .toggle input:checked + .track::after { transform: translateX(16px); }
+
+  ul.list { list-style:none; margin:0; padding:0; }
+  ul.list li { display:flex; align-items:center; justify-content:space-between; gap:12px;
+               padding: 10px 12px; border-bottom:1px solid var(--line); }
+  ul.list li:last-child { border-bottom:none; }
+  ul.list li .name { font-weight:600; overflow-wrap:anywhere; }
+  ul.list li .sub { color:var(--muted); font-size:11px; font-family:var(--font-mono);
+                    overflow-wrap:anywhere; }
+  .empty { color: var(--muted); font-style: italic; padding: 12px; font-size: 13px; }
+
+  /* ---------- list / log surfaces ---------- */
+  .surface { background: #101010; border:1px solid var(--line); border-radius:8px;
+             overflow:hidden; display:flex; flex-direction:column; min-height:0; }
+  .surface .scroll { overflow-y:auto; }
+  #log { margin:0; padding: 12px 14px; font-family: var(--font-mono); font-size: 12px;
+         line-height: 1.5; white-space: pre-wrap; }
+  #report { margin: 10px 0 0; padding: 10px 12px; font-family: var(--font-mono);
+            font-size: 12px; white-space: pre-wrap; background:#101010;
+            border:1px solid var(--line); border-radius:8px; display:none; max-height:180px;
+            overflow:auto; }
+  .badge { font-size: 11px; font-weight:700; padding:2px 8px; border-radius:6px;
+           background: var(--panel-2); border:1px solid var(--line); color: var(--muted); }
+  .badge.added { color:#fff; background: rgba(25,177,92,.18); border-color: rgba(25,177,92,.5); }
+
+  /* discover results */
+  .discover-panel { border:1px solid var(--line); border-radius:8px; margin-top:10px;
+                    display:flex; flex-direction:column; max-height: 260px; overflow:hidden; }
+  .discover-panel .head { display:flex; align-items:center; padding:8px 12px;
+                          background: var(--panel-2); border-bottom:1px solid var(--line); }
+  .discover-panel .head b { font-size:12px; letter-spacing:.06em; text-transform:uppercase; }
+  .discover-panel .scroll { overflow-y:auto; }
+  .discover-panel ul { margin:0; padding:0; list-style:none; }
+  .discover-panel li { display:flex; align-items:center; gap:10px; padding:8px 12px;
+                       border-bottom:1px solid var(--line); }
+  .discover-panel li:last-child { border-bottom:none; }
+
+  /* schedule grid */
+  .sched-grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  .sched-grid .full { grid-column: 1 / -1; }
+
+  /* scrollbars */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background:#343434; border-radius: 6px; border:2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background:#ff1a1a; border:2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .toasts { position:fixed; right:20px; bottom:20px; display:flex; flex-direction:column;
+            gap:8px; z-index:50; max-width: 360px; }
+  .toast { background: var(--panel-2); color: var(--text); border:1px solid var(--line);
+           border-left: 3px solid var(--green); padding: 10px 14px; border-radius: 8px;
+           font-size: 13px; box-shadow: var(--shadow); animation: slide .15s ease-out; }
+  .toast.err { border-left-color: var(--red); }
+  @keyframes slide { from { transform: translateX(12px); opacity:0; } }
+
+  @media (max-width: 980px) {
+    body { overflow:auto; }
+    .app { grid-template-columns: 1fr; overflow: visible; }
+    .col { max-height: none; }
+    .card.grow { flex: none; }
+  }
 </style>
 </head>
 <body>
-<h1>ytmusic-mirror <span class="muted" id="ver"></span>
-  <span class="pill off" id="pill">idle</span></h1>
-<p class="muted" style="margin-top:2px">Mirror your public YouTube Music
-playlists into a local folder of MP3s.</p>
 
-<div id="toasts"></div>
-
-<div class="card">
-  <p><b>Master folder:</b> <code id="infoMusic">…</code></p>
-  <p class="muted" id="infoArchive"></p>
-</div>
-
-<div class="card">
-  <h2>Sources</h2>
-
-  <div class="section">Channel</div>
-  <div class="field">
-    <label for="channelInput">Your YouTube channel (public playlists are discovered)</label>
-    <div class="row">
-      <input type="text" id="channelInput" placeholder="https://www.youtube.com/@YourHandle  or  @YourHandle">
-      <button id="btnChannelSet" class="primary">Set channel</button>
-      <button id="btnChannelClear" class="danger" disabled>Clear</button>
-    </div>
-    <p class="hint" id="chanCurrent">No channel set</p>
+<header>
+  <div class="brand">
+    <div class="logo">▶</div>
+    <div><h1>ytmusic-mirror</h1><small>Playlist mirror · v<span id="ver"></span></small></div>
   </div>
-
-  <div class="section">Playlists</div>
-  <div class="field">
-    <label for="playlistInput">Add a specific playlist</label>
-    <div class="row">
-      <input type="text" id="playlistInput" placeholder="https://music.youtube.com/playlist?list=…">
-      <button id="btnPlaylistAdd">Add</button>
-      <button id="btnDiscover">Discover channel playlists</button>
-    </div>
-    <p class="hint">Each playlist becomes its own folder. Adding one is enough —
-      a sync will download it.</p>
+  <div class="pill off" id="pill">idle</div>
+  <div class="spacer"></div>
+  <div class="meta-path">
+    <span>Master folder <code id="infoMusic">…</code></span>
+    <span>Archive <code id="infoArchive">…</code></span>
   </div>
-  <ul class="list" id="playlistList"><li class="empty">No explicit playlists yet</li></ul>
-  <div id="discoverBox"></div>
-</div>
+</header>
 
-<div class="card">
-  <h2>Sync</h2>
-  <div class="row">
-    <label class="inline"><input type="checkbox" id="dryRun"> dry run (preview only)</label>
-    <button id="btnSync" class="primary">Run sync</button>
-    <span class="muted" id="syncNote"></span>
-  </div>
-  <p class="hint">Downloads new songs, renames/creates folders, deletes or
-    archives removed songs, and moves deleted playlists into the archive.
-    Everything resumes if interrupted.</p>
-  <pre id="report" style="display:none"></pre>
-</div>
+<main class="app">
+  <!-- ================= LEFT ================= -->
+  <section class="col">
 
-<div class="card">
-  <h2>Log</h2>
-  <pre id="log">(no output yet — run a sync)</pre>
-</div>
+    <article class="card auto">
+      <div class="head"><h2>Sources</h2></div>
+      <div class="body">
+        <div class="field">
+          <label for="channelInput">Channel</label>
+          <div class="row">
+            <input type="text" id="channelInput" placeholder="https://www.youtube.com/@handle  or  @handle">
+            <button id="btnChannelSet" class="primary">Set</button>
+            <button id="btnChannelClear" class="danger" disabled title="Remove the channel">Clear</button>
+          </div>
+          <p class="hint" id="chanCurrent">No channel set</p>
+        </div>
 
-<div class="card">
-  <h2>On disk</h2>
-  <ul class="list" id="localList"></ul>
-</div>
+        <div class="field">
+          <label for="playlistInput">Add a playlist</label>
+          <div class="row">
+            <input type="text" id="playlistInput" placeholder="https://music.youtube.com/playlist?list=…">
+            <button id="btnPlaylistAdd">Add</button>
+          </div>
+        </div>
 
-<div class="card">
-  <h2>Settings</h2>
+        <div class="surface" style="max-height: 190px;">
+          <div class="scroll">
+            <ul class="list" id="playlistList">
+              <li class="empty">No explicit playlists yet</li>
+            </ul>
+          </div>
+        </div>
 
-  <div class="section">When a playlist is removed from your account</div>
-  <div class="field">
-    <label for="selDeleted">What happens to its local folder</label>
-    <select id="selDeleted">
-      <option value="archive">Move the whole folder into _Archive</option>
-      <option value="delete">Delete the folder</option>
-      <option value="keep">Keep it untouched</option>
-    </select>
-    <p class="hint">Archive is the safe default — nothing is ever lost.</p>
-  </div>
+        <div class="row" style="margin-top:12px">
+          <button id="btnDiscover" class="ghost">Discover channel playlists</button>
+        </div>
+        <div id="discoverBox"></div>
+      </div>
+    </article>
 
-  <div class="section">When a song disappears from a playlist</div>
-  <div class="field">
-    <label for="selOrphan">What happens to the local file</label>
-    <select id="selOrphan">
-      <option value="smart">smart — delete it, but keep copies YouTube delisted</option>
-      <option value="archive">archive — never delete files</option>
-      <option value="delete">delete — delete files even if the video is gone</option>
-    </select>
-    <p class="hint" id="orphanHint"></p>
-  </div>
+    <article class="card auto">
+      <div class="head"><h2>Automatic syncs</h2></div>
+      <div class="body">
+        <div class="row" style="justify-content:space-between">
+          <span class="inline">
+            <span class="toggle"><input type="checkbox" id="chkSchedule"><span class="track"></span></span>
+            <label for="chkSchedule" style="font-weight:600">Schedule syncs</label>
+          </span>
+          <span class="badge" id="nextRun"></span>
+        </div>
 
-  <div class="section">YouTube access</div>
-  <div class="field">
-    <label class="toggle-row"><input type="checkbox" id="chkRemoteComponents">
-      Allow yt-dlp to fetch its JS challenge solver</label>
-    <p class="hint">Fixes “Signature solving failed” / “remote components were
-      skipped” warnings. Needs a JS runtime (Deno/Node) — bundled in Docker.</p>
-  </div>
+        <div id="schedBuilder" style="display:none">
+          <div class="field">
+            <label for="schedMode">Repeat</label>
+            <select id="schedMode">
+              <option value="daily">Every day</option>
+              <option value="weekly">Every week</option>
+              <option value="interval">Every N minutes / hours</option>
+              <option value="custom">Custom (cron)</option>
+            </select>
+          </div>
 
-  <div class="section">Automatic syncs</div>
-  <div class="field">
-    <label class="toggle-row"><input type="checkbox" id="chkSchedule">
-      Run syncs on a schedule</label>
-    <p class="hint">Pick a preset or write a cron expression. A sync then runs
-      automatically while this app is running.</p>
-  </div>
-  <div class="field" id="cronBox" style="display:none">
-    <label for="schedPreset">Preset</label>
-    <select id="schedPreset">
-      <option value="0 2 * * *">Daily at 02:00</option>
-      <option value="0 2 * * 0">Weekly (Sunday 02:00)</option>
-      <option value="0 * * * *">Every hour</option>
-      <option value="*/15 * * * *">Every 15 minutes</option>
-      <option value="custom">Custom cron…</option>
-    </select>
-    <label for="schedCron" style="margin-top:8px">Cron expression
-      (minute hour day month weekday)</label>
-    <input type="text" id="schedCron" value="0 2 * * *"
-           placeholder="e.g. 0 2 * * * = every day at 02:00">
-    <p class="hint" id="nextRun"></p>
-  </div>
+          <div id="subTime" class="sched-grid">
+            <div class="field">
+              <label for="schedTime">Time</label>
+              <input type="time" id="schedTime" value="02:00">
+            </div>
+            <div class="field" id="subWeekdayWrap" style="display:none">
+              <label for="schedWeekday">Day</label>
+              <select id="schedWeekday">
+                <option value="1">Monday</option><option value="2">Tuesday</option>
+                <option value="3">Wednesday</option><option value="4">Thursday</option>
+                <option value="5">Friday</option><option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+            </div>
+          </div>
 
-  <div class="row" style="margin-top:14px">
-    <button id="btnSaveSettings" class="primary">Save settings</button>
-    <span class="muted" id="settingsNote"></span>
-  </div>
-</div>
+          <div id="subInterval" class="sched-grid" style="display:none">
+            <div class="field">
+              <label for="schedEvery">Every</label>
+              <input type="number" id="schedEvery" min="1" value="15">
+            </div>
+            <div class="field">
+              <label for="schedUnit">Unit</label>
+              <select id="schedUnit"><option value="minutes">minutes</option>
+                <option value="hours">hours</option></select>
+            </div>
+          </div>
+
+          <div class="field" id="subCron" style="display:none">
+            <label for="schedCron">Cron expression <span class="muted">(advanced)</span></label>
+            <input type="text" id="schedCron" placeholder="0 2 * * *">
+            <p class="hint">minute hour day month weekday — e.g. <code>0 2 * * *</code> = every day at 02:00</p>
+          </div>
+
+          <p class="hint" id="schedSummary"></p>
+          <div class="row">
+            <button id="btnApplySchedule" class="primary">Apply schedule</button>
+            <span class="muted" id="scheduleNote"></span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+  <!-- ================= RIGHT ================= -->
+  <section class="col">
+
+    <article class="card auto">
+      <div class="head"><h2>Sync</h2></div>
+      <div class="body">
+        <div class="row" style="justify-content:space-between">
+          <label class="inline"><input type="checkbox" id="dryRun"> dry run (preview only)</label>
+          <div class="row">
+            <button id="btnSync" class="primary">Run sync</button>
+          </div>
+        </div>
+        <p class="hint" style="margin-top:10px">Downloads new songs, reorders folders,
+          deletes or archives removed songs and mirrors playlist changes. Resumes
+          if interrupted.</p>
+        <pre id="report"></pre>
+      </div>
+    </article>
+
+    <article class="card grow">
+      <div class="head">
+        <h2>Log</h2>
+        <div class="spacer"></div>
+        <button id="btnClearLog" class="link">clear</button>
+      </div>
+      <div class="surface" style="flex:1; border:none; border-radius:0;">
+        <div class="scroll">
+          <pre id="log">(no output yet — run a sync)</pre>
+        </div>
+      </div>
+    </article>
+
+    <article class="card auto">
+      <div class="head"><h2>On disk</h2></div>
+      <div class="body nopad">
+        <div class="surface" style="max-height: 200px;">
+          <div class="scroll">
+            <ul class="list" id="localList"><li class="empty">Nothing downloaded yet</li></ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <article class="card auto">
+      <div class="head"><h2>Behavior</h2></div>
+      <div class="body">
+        <div class="field">
+          <label for="selDeleted">Playlist removed from your account</label>
+          <select id="selDeleted">
+            <option value="archive">Archive the folder in _Archive</option>
+            <option value="delete">Delete the folder</option>
+            <option value="keep">Leave it untouched</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="selOrphan">Song removed from a playlist</label>
+          <select id="selOrphan">
+            <option value="smart">Smart — delete, but keep delisted copies</option>
+            <option value="archive">Always archive</option>
+            <option value="delete">Always delete</option>
+          </select>
+          <p class="hint" id="orphanHint"></p>
+        </div>
+        <div class="field">
+          <label class="inline"><span class="toggle"><input type="checkbox" id="chkRemoteComponents"><span class="track"></span></span>
+            <span>Allow yt-dlp JS challenge solver</span></label>
+          <p class="hint">Fixes “Signature solving failed” warnings. Needs a JS
+            runtime — bundled in the Docker image.</p>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button id="btnSaveSettings" class="primary">Save behavior</button>
+          <span class="muted" id="settingsNote"></span>
+        </div>
+      </div>
+    </article>
+
+  </section>
+</main>
+
+<div class="toasts" id="toasts"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 let seq = 0;
+const HOUR = 3600000;
 
+/* ---------- feedback ---------- */
 function toast(msg, err){
   const t = document.createElement('div');
   t.className = 'toast' + (err ? ' err' : '');
   t.textContent = msg;
-  document.getElementById('toasts').appendChild(t);
-  setTimeout(()=> t.remove(), err ? 6000 : 3000);
+  $('toasts').appendChild(t);
+  setTimeout(() => t.remove(), err ? 6000 : 3200);
 }
 async function api(path, opts){
   opts = opts || {};
   const headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
   const r = await fetch(path, Object.assign({}, opts, {headers}));
-  const j = await r.json().catch(()=>({}));
+  const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || (r.status + ' ' + r.statusText));
   return j;
 }
-function setPill(state){
+function setPill(running){
   const p = $('pill');
-  p.classList.remove('off', 'busy');
-  if (state === 'busy'){ p.classList.add('busy'); p.textContent = 'syncing…'; }
-  else { p.classList.add('off'); p.textContent = 'idle'; }
+  p.classList.toggle('on', !!running);
+  p.textContent = running ? 'syncing…' : 'idle';
 }
 function logLine(line){
   const box = $('log');
@@ -212,28 +428,129 @@ function logLine(line){
   box.textContent += line + '\n';
   box.scrollTop = box.scrollHeight;
 }
+async function withBusy(btn, label, fn){
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = label + '…';
+  try { return await fn(); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+function confirmDialog(message){
+  return new Promise(resolve => {
+    const t = document.createElement('div');
+    t.className = 'toast';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;margin-top:8px';
+    const yes = document.createElement('button');
+    yes.className = 'primary'; yes.textContent = 'Yes';
+    yes.onclick = () => { resolve(true); t.remove(); };
+    const no = document.createElement('button');
+    no.textContent = 'No'; no.onclick = () => { resolve(false); t.remove(); };
+    row.appendChild(yes); row.appendChild(no);
+    t.textContent = message; t.appendChild(row);
+    $('toasts').appendChild(t);
+  });
+}
+async function ask(message){
+  return await confirmDialog(message);
+}
+
+/* ---------- schedule: friendly <-> cron ---------- */
+function buildCron(){
+  const mode = $('schedMode').value;
+  const [hh, mm] = ($('schedTime').value || '02:00').split(':');
+  if (mode === 'daily') return mm + ' ' + hh + ' * * *';
+  if (mode === 'weekly') return mm + ' ' + hh + ' * * ' + $('schedWeekday').value;
+  if (mode === 'interval'){
+    const n = Math.max(1, parseInt($('schedEvery').value || '1', 10));
+    if ($('schedUnit').value === 'hours') return '0 */' + n + ' * * *';
+    return '*/' + n + ' * * * *';
+  }
+  return ($('schedCron').value.trim() || '0 2 * * *');
+}
+function describeCron(cron){
+  const p = String(cron).trim().split(/\s+/);
+  if (p.length === 5){
+    const [mi, h, d, mo, dow] = p;
+    const num = v => /^\d+$/.test(v);
+    const weekdays = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    if (d === '*' && mo === '*'){
+      if (dow === '*' && num(h) && num(mi)){
+        return 'Every day at ' + String(h).padStart(2,'0') + ':' + String(mi).padStart(2,'0');
+      }
+      if (dow === '*' && num(mi) && mi.startsWith('*/')){
+        return 'Every ' + mi.slice(2) + ' minutes';
+      }
+      if (dow === '*' && mi === '0' && h.startsWith('*/')){
+        return 'Every ' + h.slice(2) + ' hours';
+      }
+      if (num(dow) && num(h) && num(mi) && +dow <= 6){
+        return 'Every ' + weekdays[+dow] + ' at ' +
+          String(h).padStart(2,'0') + ':' + String(mi).padStart(2,'0');
+      }
+    }
+  }
+  return 'Custom schedule';
+}
+function loadScheduleIntoForm(cron){
+  const p = String(cron || '').trim().split(/\s+/);
+  const ok = p.length === 5;
+  if (!ok){ $('schedMode').value = 'custom'; $('schedCron').value = cron || ''; return; }
+  const [mi, h, d, mo, dow] = p;
+  const num = v => /^\d+$/.test(v);
+  const setTime = m => { const hm = m.split(':'); if (hm.length===2) {
+    $('schedTime').value = hm[0].padStart(2,'0') + ':' + hm[1].padStart(2,'0'); } };
+  if (num(dow) && +dow <= 6 && num(h) && num(mi) && d === '*' && mo === '*'){
+    $('schedMode').value = 'weekly'; $('schedWeekday').value = String(+dow);
+    setTime(h + ':' + mi); return;
+  }
+  if (num(h) && num(mi) && d === '*' && mo === '*' && dow === '*'){
+    $('schedMode').value = 'daily'; setTime(h + ':' + mi); return;
+  }
+  if (mi.startsWith('*/')){
+    $('schedMode').value = 'interval'; $('schedEvery').value = mi.slice(2);
+    $('schedUnit').value = 'minutes'; return;
+  }
+  if (mi === '0' && h.startsWith('*/')){
+    $('schedMode').value = 'interval'; $('schedEvery').value = h.slice(2);
+    $('schedUnit').value = 'hours'; return;
+  }
+  $('schedMode').value = 'custom'; $('schedCron').value = cron;
+}
+function syncSchedUI(){
+  const enabled = $('chkSchedule').checked;
+  $('schedBuilder').style.display = enabled ? 'block' : 'none';
+  const mode = $('schedMode').value;
+  $('subTime').style.display = (mode === 'daily' || mode === 'weekly') ? 'grid' : 'none';
+  $('subWeekdayWrap').style.display = mode === 'weekly' ? 'block' : 'none';
+  $('subInterval').style.display = mode === 'interval' ? 'grid' : 'none';
+  $('subCron').style.display = mode === 'custom' ? 'block' : 'none';
+  $('schedSummary').textContent = enabled ? ('Runs: ' + describeCron(buildCron())) : '';
+}
+['chkSchedule','schedMode','schedTime','schedWeekday','schedEvery','schedUnit','schedCron']
+  .forEach(id => $(id).addEventListener('change', syncSchedUI));
+
+/* ---------- status rendering ---------- */
 function statusText(s){
   const cfg = s.config;
-  $('ver').textContent = 'v' + s.version;
-  setPill(s.running ? 'busy' : 'idle');
+  $('ver').textContent = s.version;
+  setPill(s.running);
   $('infoMusic').textContent = cfg.music_dir;
-  $('infoArchive').textContent = 'Archive: ' + cfg.archive_dir;
+  $('infoArchive').textContent = cfg.archive_dir;
   $('chanCurrent').textContent = cfg.channel_url
-    ? 'Current: ' + cfg.channel_url : 'No channel set';
+    ? 'Channel: ' + cfg.channel_url : 'No channel set — add one above';
   $('btnChannelClear').disabled = !cfg.channel_url;
   $('selDeleted').value = cfg.deleted_playlist_policy;
   $('selOrphan').value = cfg.orphan_policy;
   updateOrphanHint();
   $('chkRemoteComponents').checked = cfg.remote_components;
   $('chkSchedule').checked = cfg.scheduler.enabled;
-  if (document.activeElement !== $('schedCron')) $('schedCron').value = cfg.scheduler.cron;
-  $('cronBox').style.display = cfg.scheduler.enabled ? 'block' : 'none';
-  $('nextRun').textContent = cfg.scheduler.enabled
-    ? (cfg.scheduler.next_run ? 'Next run: ' + cfg.scheduler.next_run
-                              : 'Applies when you save settings.')
-    : '';
+  $('nextRun').textContent = cfg.scheduler.next_run
+    ? 'next ' + cfg.scheduler.next_run : '';
+  syncSchedUI();
+  if (document.activeElement !== $('schedCron')) loadScheduleIntoForm(cfg.scheduler.cron);
+  syncSchedUI();
   renderPlaylists(cfg.playlists);
-  if (s.last_sync) showReport(s.last_sync.report);
+  if (s.last_sync && s.last_sync.report) showReport(s.last_sync.report);
 }
 function renderPlaylists(playlists){
   const ul = $('playlistList');
@@ -245,37 +562,39 @@ function renderPlaylists(playlists){
   }
   playlists.forEach(url => {
     const li = document.createElement('li');
-    const span = document.createElement('span'); span.textContent = url;
+    const box = document.createElement('div');
+    const name = document.createElement('div'); name.className = 'name';
+    const id = (url.match(/[?&]list=([^&]+)/) || [])[1] || url;
+    name.textContent = id;
+    const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = url;
+    box.appendChild(name); box.appendChild(sub);
     const b = document.createElement('button');
     b.className = 'danger'; b.textContent = 'Remove';
     b.onclick = () => removePlaylist(url);
-    li.appendChild(span); li.appendChild(b);
+    li.appendChild(box); li.appendChild(b);
     ul.appendChild(li);
   });
 }
 function showReport(text){
   const pre = $('report');
+  if (!text){ pre.style.display = 'none'; pre.textContent = ''; return; }
   pre.style.display = 'block';
-  pre.textContent = text || '(empty report)';
+  pre.textContent = text;
 }
 function updateOrphanHint(){
   const hints = {
-    smart: 'Removes songs you dropped from a playlist, but keeps copies of songs YouTube delisted (video gone) in _Archive so you never lose them.',
+    smart: 'Deletes songs you removed from a playlist, but keeps copies of songs YouTube delisted (video gone) in _Archive so nothing is lost.',
     archive: 'Never deletes anything — removed and delisted songs are kept in _Archive.',
     delete: 'Deletes local files whenever they leave a playlist, even if the video was removed by YouTube.'
   };
   $('orphanHint').textContent = hints[$('selOrphan').value] || '';
 }
-async function withBusy(btn, label, fn){
-  const old = btn.textContent;
-  btn.disabled = true; btn.textContent = label + '…';
-  try { return await fn(); }
-  finally { btn.disabled = false; btn.textContent = old; }
-}
+
+/* ---------- sources ---------- */
 async function setChannel(){
   const url = $('channelInput').value.trim();
   if (!url){ toast('Enter a channel URL or @handle first', true); return; }
-  await withBusy($('btnChannelSet'), 'Saving', async ()=>{
+  await withBusy($('btnChannelSet'), 'Saving', async () => {
     await api('/api/sources', {method:'POST', body: JSON.stringify({action:'set-channel', url})});
     $('channelInput').value = '';
     toast('Channel set');
@@ -283,8 +602,8 @@ async function setChannel(){
   });
 }
 async function clearChannel(){
-  if (!confirm('Remove the channel? Playlists already downloaded stay on disk.')) return;
-  await withBusy($('btnChannelClear'), 'Clearing', async ()=>{
+  if (!await ask('Remove the channel? Playlists already downloaded stay on disk.')) return;
+  await withBusy($('btnChannelClear'), 'Clearing', async () => {
     await api('/api/sources', {method:'POST', body: JSON.stringify({action:'clear-channel'})});
     toast('Channel cleared');
     await refresh();
@@ -293,7 +612,7 @@ async function clearChannel(){
 async function addPlaylist(){
   const url = $('playlistInput').value.trim();
   if (!url){ toast('Enter a playlist URL first', true); return; }
-  await withBusy($('btnPlaylistAdd'), 'Adding', async ()=>{
+  await withBusy($('btnPlaylistAdd'), 'Adding', async () => {
     await api('/api/sources', {method:'POST', body: JSON.stringify({action:'add-playlist', url})});
     $('playlistInput').value = '';
     toast('Playlist added');
@@ -301,73 +620,117 @@ async function addPlaylist(){
   });
 }
 async function removePlaylist(url){
-  if (!confirm('Stop mirroring this playlist?\n' + url +
-    '\n(Songs removed from it may be deleted or archived on the next sync.)')) return;
+  if (!await ask('Stop mirroring this playlist?\n\n' + url +
+    '\n\nSongs removed from it may be deleted or archived on the next sync.')) return;
   await api('/api/sources', {method:'POST', body: JSON.stringify({action:'remove-playlist', url})});
   toast('Playlist removed');
   await refresh();
 }
 async function discover(){
-  const box = $('discoverBox');
-  box.innerHTML = '<p class="hint">Looking up channel playlists…</p>';
-  await withBusy($('btnDiscover'), 'Discovering', async ()=>{
-    const j = await api('/api/discover', {method:'POST'});
+  await withBusy($('btnDiscover'), 'Searching', async () => {
+    const box = $('discoverBox');
     box.innerHTML = '';
+    const j = await api('/api/discover', {method:'POST'});
     const remote = j.remote || [];
-    if (!remote.length){ box.innerHTML = '<p class="empty">No public playlists found on the channel.</p>'; return; }
+    if (!remote.length){
+      box.innerHTML = '<p class="hint" style="margin-top:10px">No public playlists found. Set a channel first.</p>';
+      return;
+    }
+    const panel = document.createElement('div');
+    panel.className = 'discover-panel';
+    const head = document.createElement('div');
+    head.className = 'head';
+    const title = document.createElement('b');
+    title.textContent = remote.length + ' playlists found';
+    const sp = document.createElement('div'); sp.style.cssText = 'flex:1';
+    const close = document.createElement('button'); close.className = 'link';
+    close.textContent = '✕'; close.title = 'Collapse';
+    close.onclick = () => box.remove();
+    head.appendChild(title); head.appendChild(sp); head.appendChild(close);
+
+    const scroll = document.createElement('div');
+    scroll.className = 'scroll';
+    const ul = document.createElement('ul');
     remote.forEach(r => {
       const li = document.createElement('li');
-      const wrap = document.createElement('div');
-      const t = document.createElement('span'); t.textContent = r.title;
-      const u = document.createElement('div'); u.className = 'hint'; u.textContent = r.url;
-      wrap.appendChild(t); wrap.appendChild(u);
+      const box2 = document.createElement('div');
+      const t = document.createElement('div'); t.className = 'name'; t.textContent = r.title;
+      const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = r.url;
+      box2.appendChild(t); box2.appendChild(sub);
       const b = document.createElement('button'); b.textContent = 'Add';
-      b.onclick = async ()=>{
-        await api('/api/sources', {method:'POST', body: JSON.stringify({action:'add-playlist', url:r.url})});
-        toast('Added "' + r.title + '"');
+      b.onclick = async () => {
         b.disabled = true;
+        await api('/api/sources', {method:'POST', body: JSON.stringify({action:'add-playlist', url:r.url})});
+        b.classList.add('badge', 'added'); b.textContent = 'Added ✓';
+        toast('Added "' + r.title + '"');
         await refresh();
       };
-      li.appendChild(wrap); li.appendChild(b);
-      box.appendChild(li);
+      li.appendChild(box2); li.appendChild(b);
+      ul.appendChild(li);
     });
+    scroll.appendChild(ul);
+    panel.appendChild(head); panel.appendChild(scroll);
+    box.appendChild(panel);
+    toast(remote.length + ' playlist(s) found');
   });
 }
+
+/* ---------- sync ---------- */
 async function runSync(){
   const dry = $('dryRun').checked;
-  if (!dry && !confirm('Run a real sync? It downloads new songs and can delete or archive songs removed from your playlists.')) return;
+  if (!dry && !await ask('Run a real sync?\n\nIt downloads new songs and can delete or archive songs removed from your playlists.')) return;
   const btn = $('btnSync');
   btn.disabled = true; btn.textContent = 'Syncing…';
-  setPill('busy'); $('syncNote').textContent = 'started — watch the log below';
+  setPill(true);
   try {
     await api('/api/sync', {method:'POST', body: JSON.stringify({dry_run: dry})});
+    toast('Sync started — see log');
   } catch(e){
     toast(e.message, true);
-    btn.disabled = false; btn.textContent = 'Run sync'; setPill('idle');
+    btn.disabled = false; btn.textContent = 'Run sync'; setPill(false);
   }
 }
-async function saveSettings(){
-  await withBusy($('btnSaveSettings'), 'Saving', async ()=>{
+
+/* ---------- settings ---------- */
+async function applySchedule(){
+  await withBusy($('btnApplySchedule'), 'Applying', async () => {
+    const cron = buildCron();
     const s = await api('/api/settings', {method:'PATCH', body: JSON.stringify({
-      orphan_policy: $('selOrphan').value,
-      deleted_playlist_policy: $('selDeleted').value,
-      remote_components: $('chkRemoteComponents').checked,
-      scheduler: {enabled: $('chkSchedule').checked, cron: $('schedCron').value.trim()}
+      scheduler: {enabled: true, cron}
     })});
     const sch = s.scheduler || {};
-    if (sch.enabled && sch.next_run) toast('Saved. Next auto sync: ' + sch.next_run);
-    else if (sch.enabled) toast('Saved — schedule enabled');
-    else toast('Settings saved');
+    if (sch.next_run) toast('Scheduled. Next run: ' + sch.next_run);
+    else toast('Schedule enabled');
     await refresh();
   });
 }
+async function saveBehavior(){
+  await withBusy($('btnSaveSettings'), 'Saving', async () => {
+    await api('/api/settings', {method:'PATCH', body: JSON.stringify({
+      orphan_policy: $('selOrphan').value,
+      deleted_playlist_policy: $('selDeleted').value,
+      remote_components: $('chkRemoteComponents').checked
+    })});
+    toast('Behavior saved');
+    await refresh();
+  });
+}
+async function disableSchedule(){
+  await api('/api/settings', {method:'PATCH', body: JSON.stringify({
+    scheduler: {enabled: false, cron: buildCron()}
+  })});
+  toast('Automatic syncs disabled');
+  await refresh();
+}
+
+/* ---------- polling ---------- */
 async function refresh(){
   try {
     const s = await api('/api/status');
     statusText(s);
     const l = await api('/api/local');
     renderLocal(l);
-  } catch(e){ /* transient */ }
+  } catch(_){ /* transient */ }
 }
 function renderLocal(l){
   const ul = $('localList');
@@ -379,11 +742,14 @@ function renderLocal(l){
   }
   l.folders.forEach(f => {
     const li = document.createElement('li');
-    const span = document.createElement('span');
-    span.textContent = f.name + ' — ' + (f.songs >= 0 ? f.songs + ' songs' : 'unknown')
-                     + (f.config ? '' : ' (no config)');
-    li.appendChild(span);
-    ul.appendChild(li);
+    const box = document.createElement('div');
+    const name = document.createElement('div'); name.className = 'name';
+    name.textContent = f.name;
+    const sub = document.createElement('div'); sub.className = 'sub';
+    sub.textContent = (f.songs >= 0 ? f.songs + ' songs' : 'scan failed')
+                     + (f.config ? '' : ' · no config');
+    box.appendChild(name); box.appendChild(sub);
+    li.appendChild(box); ul.appendChild(li);
   });
 }
 async function tail(){
@@ -391,35 +757,34 @@ async function tail(){
     const l = await api('/api/logs?after=' + seq);
     seq = l.seq;
     if (l.logs.length) logLine(l.logs.join('\n'));
-    const wasBusy = $('pill').classList.contains('busy');
-    if (wasBusy && !l.running){
-      const btn = $('btnSync');
-      btn.disabled = false; btn.textContent = 'Run sync';
-      $('syncNote').textContent = '';
+    const busy = $('pill').classList.contains('on');
+    if (busy && !l.running){
       const s = await api('/api/status');
-      setPill('idle'); statusText(s);
+      setPill(false); statusText(s);
       const errs = (s.last_sync && s.last_sync.errors) || 0;
-      if (errs) toast('Sync finished with ' + errs + ' error(s) — see log', true);
-      else toast('Sync finished');
+      toast(errs ? ('Sync finished with ' + errs + ' error(s) — see log') : 'Sync finished', !!errs);
+      $('btnSync').disabled = false; $('btnSync').textContent = 'Run sync';
       await refresh();
     }
   } catch(_){ /* ignore */ }
 }
 
+/* wire up */
 $('btnChannelSet').addEventListener('click', setChannel);
 $('btnChannelClear').addEventListener('click', clearChannel);
 $('btnPlaylistAdd').addEventListener('click', addPlaylist);
 $('btnDiscover').addEventListener('click', discover);
 $('btnSync').addEventListener('click', runSync);
-$('btnSaveSettings').addEventListener('click', saveSettings);
+$('btnClearLog').addEventListener('click', () => { $('log').textContent = '(no output yet — run a sync)'; });
+$('btnApplySchedule').addEventListener('click', applySchedule);
+$('btnSaveSettings').addEventListener('click', saveBehavior);
 $('selOrphan').addEventListener('change', updateOrphanHint);
-$('chkSchedule').addEventListener('change', ()=>{
-  $('cronBox').style.display = $('chkSchedule').checked ? 'block' : 'none';
+$('chkSchedule').addEventListener('change', () => {
+  const on = $('chkSchedule').checked;
+  if (!on) disableSchedule();
+  syncSchedUI();
 });
-$('schedPreset').addEventListener('change', ()=>{
-  const v = $('schedPreset').value;
-  if (v !== 'custom') $('schedCron').value = v;
-});
+$('schedCron').addEventListener('input', () => { $('schedMode').value = 'custom'; syncSchedUI(); });
 
 refresh().catch(e => toast(e.message || String(e), true));
 setInterval(tail, 900);
