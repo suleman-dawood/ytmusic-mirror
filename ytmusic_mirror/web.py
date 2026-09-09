@@ -54,12 +54,14 @@ class WebSink:
             return list(self.lines[after:])
 
 
-def _sync_runner(cfg: Config, dry_run: bool, sink: WebSink) -> dict:
+def _sync_runner(cfg: Config, dry_run: bool, sink: WebSink,
+                 cancel=None) -> dict:
     """Runs one sync; returns a small summary dict."""
     if dry_run:
         sink.write("DRY RUN - nothing will be downloaded, moved or deleted.\n")
     try:
-        report = run_sync(cfg, dry_run=dry_run, log=Logger(out=sink.write))
+        report = run_sync(cfg, dry_run=dry_run, log=Logger(out=sink.write),
+                          cancel=cancel)
     except KeyboardInterrupt:
         sink.write("\nInterrupted (safe to re-run).")
         return {"interrupted": True}
@@ -67,6 +69,7 @@ def _sync_runner(cfg: Config, dry_run: bool, sink: WebSink) -> dict:
         "dry_run": dry_run,
         "report": pretty_report(report),
         "errors": len(report.errors),
+        "cancelled": bool(report.cancelled),
     }
 
 
@@ -78,6 +81,7 @@ class Server:
         self.sink = WebSink()
         self._sync_active = False
         self._sync_lock = threading.Lock()
+        self._cancel_event = threading.Event()
         self._last_sync: Optional[dict] = None
         self._ensure_config(music_dir_override)
         self.cfg = Config.load(self.config_path)
@@ -110,6 +114,7 @@ class Server:
     def start_sync(self, dry_run: bool) -> bool:
         if not self._sync_lock.acquire(blocking=False):
             return False
+        self._cancel_event.clear()
         self._sync_active = True
         thread = threading.Thread(
             target=self._run_worker, args=(dry_run,), daemon=True
@@ -117,12 +122,23 @@ class Server:
         thread.start()
         return True
 
+    def request_stop(self) -> None:
+        self._cancel_event.set()
+        self.sink.write("\nStop requested - finishing current step, will not "
+                        "start new playlists.")
+
     def _run_worker(self, dry_run: bool) -> None:
         try:
             self.reload()
             self.sink.write(f"\n=== ytmusic-mirror v{__version__} sync "
                             f"{'(dry-run)' if dry_run else ''} started ===")
-            self._last_sync = _sync_runner(self.cfg, dry_run, self.sink)
+            self._last_sync = _sync_runner(
+                self.cfg, dry_run, self.sink,
+                cancel=lambda: self._cancel_event.is_set(),
+            )
+            if self._last_sync.get("cancelled"):
+                self.sink.write("\nSync stopped by user - already-finished "
+                                "playlists are kept; re-run to continue.")
             tail = self._last_sync.get("report") or ""
             if tail:
                 self.sink.write(tail)
@@ -130,7 +146,7 @@ class Server:
                 self.sink.write(
                     f"\nSync finished with {self._last_sync['errors']} error(s)."
                 )
-            else:
+            elif not self._last_sync.get("cancelled"):
                 self.sink.write("\nSync finished.")
         except Exception as e:  # noqa: BLE001 - surface everything to the UI
             self.sink.write(f"\nSync crashed: {e}")
@@ -138,6 +154,26 @@ class Server:
         finally:
             self._sync_active = False
             self._sync_lock.release()
+
+    def set_music_dir(self, raw: str) -> tuple:
+        """Change the master folder; returns (ok, error_or_none)."""
+        from .config import expand_user_path
+
+        candidate = raw.strip()
+        absolute = candidate.startswith(("~", "/")) or (
+            len(candidate) >= 2 and candidate[1] == ":"
+        )
+        if not absolute:
+            return False, "Use an absolute path or ~/... (e.g. /music)"
+        try:
+            new_dir = expand_user_path(candidate)
+        except ValueError as e:
+            return False, str(e)
+        self.cfg.music_dir = new_dir
+        self.save()
+        self.reload()
+        self.sink.write(f"Master folder changed to {new_dir}")
+        return True, None
 
     # -- scheduler ------------------------------------------------------------
 
@@ -329,6 +365,23 @@ def create_app(server: Server) -> FastAPI:
         if not server.start_sync(dry_run):
             return JSONResponse({"error": "a sync is already running"}, status_code=409)
         return JSONResponse({"started": True, "dry_run": dry_run})
+
+    @app.post("/api/sync/stop")
+    def sync_stop() -> JSONResponse:
+        if not server.sync_active:
+            return JSONResponse({"stopping": False})
+        server.request_stop()
+        return JSONResponse({"stopping": True})
+
+    @app.post("/api/folder")
+    def folder(payload: dict = Body(...)) -> JSONResponse:
+        raw = str(payload.get("path") or "")
+        if not raw:
+            return JSONResponse({"error": "empty path"}, status_code=400)
+        ok, error = server.set_music_dir(raw)
+        if not ok:
+            return JSONResponse({"error": error}, status_code=400)
+        return JSONResponse(_config_summary(server))
 
     @app.get("/api/local")
     def local() -> dict:

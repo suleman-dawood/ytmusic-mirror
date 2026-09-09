@@ -120,7 +120,7 @@ def test_sync_run_and_logs(server_and_client, monkeypatch):
     server, client, _, _ = server_and_client
     calls = {}
 
-    def fake_sync(cfg, dry_run=False, log=None):
+    def fake_sync(cfg, dry_run=False, log=None, cancel=None):
         calls["dry_run"] = dry_run
         log.info("one")
         log.info("two")
@@ -147,7 +147,7 @@ def test_sync_run_and_logs(server_and_client, monkeypatch):
 def test_sync_conflict_409(server_and_client, monkeypatch):
     server, client, _, _ = server_and_client
 
-    def slow_sync(cfg, dry_run=False, log=None):
+    def slow_sync(cfg, dry_run=False, log=None, cancel=None):
         time.sleep(0.5)
         from ytmusic_mirror.core import SyncReport
 
@@ -182,3 +182,53 @@ def test_config_scheduler_roundtrip(tmp_path):
     again = Config.load(path)
     assert again.scheduler_enabled is True
     assert again.scheduler_cron == "*/5 * * * *"
+
+
+def test_set_master_folder(server_and_client):
+    _, client, cfg_file, music = server_and_client
+    target = cfg_file.parent / "elsewhere"
+    r = client.post("/api/folder", json={"path": str(target)})
+    assert r.status_code == 200
+    assert r.json()["music_dir"] == str(target.resolve())
+    assert Config.load(cfg_file).music_dir == target.resolve()
+
+    # relative paths are rejected
+    r = client.post("/api/folder", json={"path": "just-a-name"})
+    assert r.status_code == 400
+
+    # tilde works
+    r = client.post("/api/folder", json={"path": "~/Documents/ytm"})
+    assert r.status_code == 200
+
+
+def test_stop_sync(server_and_client, monkeypatch):
+    server, client, _, _ = server_and_client
+
+    def cancellable_sync(cfg, dry_run=False, log=None, cancel=None):
+        from ytmusic_mirror.core import SyncReport
+
+        report = SyncReport()
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if cancel and cancel():
+                report.cancelled = True
+                return report
+            time.sleep(0.02)
+        return report
+
+    monkeypatch.setattr("ytmusic_mirror.web.run_sync", cancellable_sync)
+
+    assert client.post("/api/sync", json={}).status_code == 200
+    assert wait_for(lambda: server.sync_active)
+    r = client.post("/api/sync/stop")
+    assert r.status_code == 200 and r.json()["stopping"] is True
+    assert wait_for(lambda: not server.sync_active)
+
+    status = client.get("/api/status").json()
+    assert status["last_sync"]["cancelled"] is True
+    logs = client.get("/api/logs").json()
+    assert any("Stop requested" in line for line in logs["logs"])
+
+    # idle stop is a no-op
+    r = client.post("/api/sync/stop")
+    assert r.status_code == 200 and r.json()["stopping"] is False

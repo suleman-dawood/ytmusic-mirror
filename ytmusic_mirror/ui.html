@@ -77,23 +77,23 @@
   .card.grow { flex: 1 1 0; }
   .card.auto { flex: 0 0 auto; }
   .card > .head {
-    display:flex; align-items:center; gap:10px; padding: 14px 18px 10px; flex:0 0 auto;
+    display:flex; align-items:center; gap:10px; padding: 7px 14px 5px; flex:0 0 auto;
     border-bottom: 1px solid var(--line);
   }
   .card > .head h2 {
-    margin:0; font-size: 12px; font-weight: 700; letter-spacing:.14em;
+    margin:0; font-size: 10.5px; font-weight: 700; letter-spacing:.12em;
     text-transform: uppercase; color: var(--muted);
   }
-  .card > .head h2::before { content:""; display:inline-block; width:8px; height:8px;
-    margin-right:10px; border-radius:2px; background: var(--red); }
-  .card > .body { padding: 14px 18px 18px; overflow-y:auto; flex:1; min-height:0; }
+  .card > .head h2::before { content:""; display:inline-block; width:7px; height:7px;
+    margin-right:8px; border-radius:2px; background: var(--red); }
+  .card > .body { padding: 9px 14px 12px; overflow-y:auto; flex:1; min-height:0; }
   .scroll { overflow-y:auto; min-height:0; }
   .card > .body.nopad { padding: 0; }
 
   /* ---------- fields ---------- */
-  .section-label { font-size: 11px; font-weight:700; letter-spacing:.1em;
-                   text-transform:uppercase; color: var(--muted); margin: 16px 0 8px; }
-  .field { display:flex; flex-direction:column; gap:6px; margin: 10px 0; }
+  .section-label { font-size: 10.5px; font-weight:700; letter-spacing:.1em;
+                   text-transform:uppercase; color: var(--muted); margin: 12px 0 6px; }
+  .field { display:flex; flex-direction:column; gap:5px; margin: 8px 0; }
   .field label { font-size: 12.5px; font-weight:600; }
   .hint, .muted { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.45; }
   input[type=text], input[type=time], input[type=number], select {
@@ -213,6 +213,19 @@
   <section class="col">
 
     <article class="card auto">
+      <div class="head"><h2>Master folder</h2></div>
+      <div class="body">
+        <div class="row">
+          <input type="text" id="musicDir" placeholder="/music or /absolute/path">
+          <button id="btnFolderSave" class="primary">Save</button>
+        </div>
+        <p class="hint" id="folderHint">Where playlists are mirrored. Use an
+          absolute path (or <code>~/…</code>). In Docker this is the folder you
+          mounted at <code>/music</code>.</p>
+      </div>
+    </article>
+
+    <article class="card auto">
       <div class="head"><h2>Sources</h2></div>
       <div class="body">
         <div class="field">
@@ -325,11 +338,12 @@
           <label class="inline"><input type="checkbox" id="dryRun"> dry run (preview only)</label>
           <div class="row">
             <button id="btnSync" class="primary">Run sync</button>
+            <button id="btnStop" class="danger" style="display:none">Stop</button>
           </div>
         </div>
-        <p class="hint" style="margin-top:10px">Downloads new songs, reorders folders,
+        <p class="hint" style="margin-top:8px">Downloads new songs, reorders folders,
           deletes or archives removed songs and mirrors playlist changes. Resumes
-          if interrupted.</p>
+          if interrupted. Stop finishes the current playlist, then halts.</p>
         <pre id="report"></pre>
       </div>
     </article>
@@ -399,6 +413,7 @@
 <script>
 const $ = id => document.getElementById(id);
 let seq = 0;
+let scheduleDirty = false;
 const HOUR = 3600000;
 
 /* ---------- feedback ---------- */
@@ -526,8 +541,8 @@ function syncSchedUI(){
   $('subCron').style.display = mode === 'custom' ? 'block' : 'none';
   $('schedSummary').textContent = enabled ? ('Runs: ' + describeCron(buildCron())) : '';
 }
-['chkSchedule','schedMode','schedTime','schedWeekday','schedEvery','schedUnit','schedCron']
-  .forEach(id => $(id).addEventListener('change', syncSchedUI));
+['schedMode','schedTime','schedWeekday','schedEvery','schedUnit']
+  .forEach(id => $(id).addEventListener('change', () => { scheduleDirty = true; syncSchedUI(); }));
 
 /* ---------- status rendering ---------- */
 function statusText(s){
@@ -543,12 +558,22 @@ function statusText(s){
   $('selOrphan').value = cfg.orphan_policy;
   updateOrphanHint();
   $('chkRemoteComponents').checked = cfg.remote_components;
-  $('chkSchedule').checked = cfg.scheduler.enabled;
-  $('nextRun').textContent = cfg.scheduler.next_run
+  if (document.activeElement !== $('musicDir')) $('musicDir').value = cfg.music_dir;
+  // Don't clobber the schedule controls while the user is editing/just changed them.
+  const editingSched = scheduleDirty ||
+    $('schedBuilder').contains(document.activeElement) ||
+    document.activeElement === $('chkSchedule');
+  if (!editingSched){
+    $('chkSchedule').checked = cfg.scheduler.enabled;
+    loadScheduleIntoForm(cfg.scheduler.cron);
+  }
+  $('nextRun').textContent = (cfg.scheduler.enabled && cfg.scheduler.next_run)
     ? 'next ' + cfg.scheduler.next_run : '';
   syncSchedUI();
-  if (document.activeElement !== $('schedCron')) loadScheduleIntoForm(cfg.scheduler.cron);
-  syncSchedUI();
+  const running = !!s.running;
+  $('btnSync').disabled = running;
+  $('btnSync').textContent = 'Run sync';
+  $('btnStop').style.display = running ? '' : 'none';
   renderPlaylists(cfg.playlists);
   if (s.last_sync && s.last_sync.report) showReport(s.last_sync.report);
 }
@@ -681,28 +706,45 @@ async function runSync(){
   if (!dry && !await ask('Run a real sync?\n\nIt downloads new songs and can delete or archive songs removed from your playlists.')) return;
   const btn = $('btnSync');
   btn.disabled = true; btn.textContent = 'Syncing…';
+  $('btnStop').style.display = ''; $('btnStop').disabled = false;
   setPill(true);
   try {
     await api('/api/sync', {method:'POST', body: JSON.stringify({dry_run: dry})});
     toast('Sync started — see log');
   } catch(e){
     toast(e.message, true);
-    btn.disabled = false; btn.textContent = 'Run sync'; setPill(false);
+    btn.disabled = false; btn.textContent = 'Run sync';
+    $('btnStop').style.display = 'none'; setPill(false);
   }
+}
+async function stopSync(){
+  if (!await ask('Stop the sync? It finishes the current playlist, then halts. Already-downloaded songs are kept.')) return;
+  try {
+    await api('/api/sync/stop', {method:'POST'});
+    $('btnStop').disabled = true;
+    toast('Stopping — finishing current step…');
+  } catch(e){ toast(e.message, true); }
 }
 
 /* ---------- settings ---------- */
-async function applySchedule(){
-  await withBusy($('btnApplySchedule'), 'Applying', async () => {
-    const cron = buildCron();
+async function applyScheduleEnabled(enabled){
+  try {
     const s = await api('/api/settings', {method:'PATCH', body: JSON.stringify({
-      scheduler: {enabled: true, cron}
+      scheduler: {enabled: !!enabled, cron: buildCron()}
     })});
+    scheduleDirty = false;
     const sch = s.scheduler || {};
-    if (sch.next_run) toast('Scheduled. Next run: ' + sch.next_run);
-    else toast('Schedule enabled');
+    if (enabled && sch.next_run) toast('Scheduled. Next run: ' + sch.next_run);
+    else if (enabled) toast('Schedule enabled');
+    else toast('Automatic syncs disabled');
     await refresh();
-  });
+  } catch(e){
+    toast(e.message || String(e), true);
+    await refresh();
+  }
+}
+async function applySchedule(){
+  await withBusy($('btnApplySchedule'), 'Applying', () => applyScheduleEnabled(true));
 }
 async function saveBehavior(){
   await withBusy($('btnSaveSettings'), 'Saving', async () => {
@@ -715,12 +757,14 @@ async function saveBehavior(){
     await refresh();
   });
 }
-async function disableSchedule(){
-  await api('/api/settings', {method:'PATCH', body: JSON.stringify({
-    scheduler: {enabled: false, cron: buildCron()}
-  })});
-  toast('Automatic syncs disabled');
-  await refresh();
+async function saveFolder(){
+  const p = $('musicDir').value.trim();
+  if (!p){ toast('Enter a folder path first', true); return; }
+  await withBusy($('btnFolderSave'), 'Saving', async () => {
+    await api('/api/folder', {method:'POST', body: JSON.stringify({path: p})});
+    toast('Master folder updated');
+    await refresh();
+  });
 }
 
 /* ---------- polling ---------- */
@@ -760,10 +804,12 @@ async function tail(){
     const busy = $('pill').classList.contains('on');
     if (busy && !l.running){
       const s = await api('/api/status');
+      const cancelled = s.last_sync && s.last_sync.cancelled;
       setPill(false); statusText(s);
       const errs = (s.last_sync && s.last_sync.errors) || 0;
-      toast(errs ? ('Sync finished with ' + errs + ' error(s) — see log') : 'Sync finished', !!errs);
-      $('btnSync').disabled = false; $('btnSync').textContent = 'Run sync';
+      if (cancelled) toast('Sync stopped — run again to continue');
+      else if (errs) toast('Sync finished with ' + errs + ' error(s) — see log', true);
+      else toast('Sync finished');
       await refresh();
     }
   } catch(_){ /* ignore */ }
@@ -775,16 +821,22 @@ $('btnChannelClear').addEventListener('click', clearChannel);
 $('btnPlaylistAdd').addEventListener('click', addPlaylist);
 $('btnDiscover').addEventListener('click', discover);
 $('btnSync').addEventListener('click', runSync);
+$('btnStop').addEventListener('click', stopSync);
+$('btnFolderSave').addEventListener('click', saveFolder);
 $('btnClearLog').addEventListener('click', () => { $('log').textContent = '(no output yet — run a sync)'; });
 $('btnApplySchedule').addEventListener('click', applySchedule);
 $('btnSaveSettings').addEventListener('click', saveBehavior);
 $('selOrphan').addEventListener('change', updateOrphanHint);
 $('chkSchedule').addEventListener('change', () => {
-  const on = $('chkSchedule').checked;
-  if (!on) disableSchedule();
+  scheduleDirty = true;
+  applyScheduleEnabled($('chkSchedule').checked);
   syncSchedUI();
 });
-$('schedCron').addEventListener('input', () => { $('schedMode').value = 'custom'; syncSchedUI(); });
+$('schedCron').addEventListener('input', () => {
+  scheduleDirty = true;
+  $('schedMode').value = 'custom';
+  syncSchedUI();
+});
 
 refresh().catch(e => toast(e.message || String(e), true));
 setInterval(tail, 900);
