@@ -6,6 +6,7 @@ dist/
 .pytest_cache/
 .venv/
 venv/
+music/
 .coverage
 htmlcov/
 

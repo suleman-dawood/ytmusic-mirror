@@ -49,8 +49,7 @@ class WebSink:
 
     def tail(self, after: int) -> List[str]:
         with self.lock:
-            if after < 0:
-                after = 0
+            after = max(after, 0)
             return list(self.lines[after:])
 
 
