@@ -10,6 +10,11 @@ Works on **Windows and Linux**.
 [![Docker Hub](https://img.shields.io/docker/pulls/sulemandawood/ytmusic-mirror?color=ff1a1a&label=Docker%20Hub)](https://hub.docker.com/u/sulemandawood)
 [![GHCR](https://img.shields.io/badge/GHCR-ghcr.io-ff1a1a)](https://github.com/suleman-dawood/ytmusic-mirror/pkgs/container/ytmusic-mirror)
 
+<img src="https://raw.githubusercontent.com/suleman-dawood/ytmusic-mirror/main/assets/screenshot.png"
+     alt="ytmusic-mirror web dashboard" width="780">
+<br><small><em>The optional self-hosted web dashboard: sources, live sync log,
+plain-English scheduling, folders on disk and behavior settings.</em></small>
+
 ```
 ~/Music/MP3s/                    <- your master folder
 ├── Road Trip/
