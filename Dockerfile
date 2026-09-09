@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # Deno provides the JS runtime yt-dlp uses to solve signature challenges.
 FROM python:3.13-slim
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*

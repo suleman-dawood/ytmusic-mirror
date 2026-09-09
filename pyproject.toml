@@ -34,6 +34,7 @@ dev = [
     "fastapi",
     "uvicorn",
     "apscheduler",
+    "pylint",
 ]
 
 [project.scripts]
@@ -51,3 +52,26 @@ pythonpath = ["."]
 markers = [
     "live: network tests; run with YT_MIRROR_LIVE=1",
 ]
+
+[tool.pylint."messages control"]
+disable = [
+    "C0114",  # missing-module-docstring
+    "C0115",  # missing-class-docstring
+    "C0116",  # missing-function-docstring: repo intentionally has no docstrings
+    "C0103",  # invalid-name: camelCase imported bindings are intentional
+    "C0301",  # line-too-long
+    "C0415",  # import-outside-toplevel: lazy imports keep web optional
+    "R0401",  # cyclic-import: same lazy-import design
+    "R0902",  # too-many-instance-attributes
+    "R0912",  # too-many-branches
+    "R0913",  # too-many-arguments
+    "R0914",  # too-many-locals
+    "R0915",  # too-many-statements
+    "R0917",  # too-many-positional-arguments
+    "R1721",  # unnecessary-comprehension: intentional copy
+    "R1732",  # consider-using-with: acquire(blocking=False) has no `with` form
+    "W0108",  # unnecessary-lambda
+    "W0212",  # protected-access: same-module internal state
+    "W0718",  # broad-exception-caught: deliberate robustness
+]
+max-line-length = 100

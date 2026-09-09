@@ -107,9 +107,9 @@ def _cmd_init(args: argparse.Namespace) -> int:
     path = write_default_config(config_path, music_dir=args.dir)
     print(f"Wrote default config to {path}")
     print("Now tell it what to mirror, for example:")
-    print(f"  ytmusic-mirror channel https://www.youtube.com/@YourHandle")
-    print(f"  ytmusic-mirror add <playlist-url> [more-playlist-urls...]")
-    print(f"Playlists will be synced into the master folder set in 'music_dir'.")
+    print("  ytmusic-mirror channel https://www.youtube.com/@YourHandle")
+    print("  ytmusic-mirror add <playlist-url> [more-playlist-urls...]")
+    print("Playlists will be synced into the master folder set in 'music_dir'.")
     return 0
 
 
@@ -218,7 +218,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
     config_path = _config_path(args)
     if not config_path.exists():
         print(f"No config yet at {config_path}.")
-        print(f"Run `ytmusic-mirror init --dir <folder>` to create one.")
+        print("Run `ytmusic-mirror init --dir <folder>` to create one.")
         return 0
     cfg = Config.load(config_path)
     print(f"Config file : {config_path}")

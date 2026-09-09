@@ -27,3 +27,19 @@ jobs:
 
       - name: Offline tests with coverage floor
         run: python -m pytest -q -m "not live" --cov=ytmusic_mirror --cov-report=term --cov-fail-under=90
+
+  lint:
+    name: pylint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Lint with pylint
+        run: python -m pylint ytmusic_mirror
