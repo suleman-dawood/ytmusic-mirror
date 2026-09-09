@@ -81,6 +81,7 @@ class SyncReport:
     delisted_songs: List[str] = field(default_factory=list)
     unavailable: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    cancelled: bool = False
     errors: List[str] = field(default_factory=list)
     skipped_playlists: List[str] = field(default_factory=list)
 
@@ -301,17 +302,23 @@ def snapshot_local_playlists(music_dir: Path) -> Dict[str, LocalPlaylist]:
 # --------------------------------------------------------------------------- #
 
 
-def sync(cfg: Config, dry_run: bool = False, log: Optional[Logger] = None) -> SyncReport:
+def sync(
+    cfg: Config,
+    dry_run: bool = False,
+    log: Optional[Logger] = None,
+    cancel: Optional[Callable[[], bool]] = None,
+) -> SyncReport:
     """Mirror the configured remote playlists into the music directory.
 
     Designed to be resumable: per-playlist work is isolated so one failure or an
     interrupted run never loses finished work - simply run it again to continue.
+    When `cancel()` returns True the sync stops at the next playlist boundary.
     """
     log = log or Logger()
     report = SyncReport()
     previous_cwd = Path.cwd()
     try:
-        _sync_locked(cfg, dry_run=dry_run, report=report, log=log)
+        _sync_locked(cfg, dry_run=dry_run, report=report, log=log, cancel=cancel)
     finally:
         if Path.cwd() != previous_cwd:
             os.chdir(previous_cwd)
@@ -319,7 +326,11 @@ def sync(cfg: Config, dry_run: bool = False, log: Optional[Logger] = None) -> Sy
 
 
 def _sync_locked(
-    cfg: Config, dry_run: bool, report: SyncReport, log: Logger
+    cfg: Config,
+    dry_run: bool,
+    report: SyncReport,
+    log: Logger,
+    cancel: Optional[Callable[[], bool]] = None,
 ) -> None:
     """Body of sync(), executed with the music dir as the working directory."""
     cfg.music_dir.mkdir(parents=True, exist_ok=True)
@@ -361,6 +372,14 @@ def _sync_locked(
             cfg, plan, dry_run=dry_run, report=report, log=log,
             seq=(processed, total),
         )
+        if cancel and cancel():
+            log.info("Sync stopped by request (next sync will resume).")
+            report.cancelled = True
+            break
+
+    if cancel and cancel():
+        log.info("Sync stopped by request (next sync will resume).")
+        report.cancelled = True
 
     for playlist_id, local_pl in sorted(local.items()):
         if playlist_id in remote_by_id:
@@ -377,6 +396,10 @@ def _sync_locked(
             cfg, plan, dry_run=dry_run, report=report, log=log,
             seq=(processed, total),
         )
+        if cancel and cancel():
+            log.info("Sync stopped by request (next sync will resume).")
+            report.cancelled = True
+            break
 
 
 def _execute_plan(

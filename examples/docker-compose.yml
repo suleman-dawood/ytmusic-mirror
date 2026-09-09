@@ -1,0 +1,16 @@
+services:
+  ytmusic-mirror:
+    image: ghcr.io/suleman-dawood/ytmusic-mirror:latest
+    container_name: ytmusic-mirror
+    ports:
+      - "8000:8000"
+    environment:
+      - TZ=UTC
+      # Master folder inside the container (mapped below).
+      - YTMUSIC_MIRROR_MUSIC=/music
+    volumes:
+      # Your MP3 mirror lives here (point your own player/Navidrome at it).
+      - ./music:/music
+      # Config + per-playlist state persists here.
+      - ./config:/config
+    restart: unless-stopped

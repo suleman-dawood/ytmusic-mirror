@@ -163,6 +163,21 @@ def _cmd_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    try:
+        from .web import run
+    except Exception as e:  # fastapi/uvicorn/apscheduler not installed
+        print(
+            "Web dashboard dependencies are missing. Install them with: "
+            "`pip install \"ytmusic-mirror[web]\"`.",
+            file=sys.stderr,
+        )
+        print(f"  ({e})", file=sys.stderr)
+        return 1
+    run(_config_path(args), music_dir=args.dir, host=args.host, port=args.port)
+    return 0
+
+
 def _cmd_remove(args: argparse.Namespace) -> int:
     cfg, config_path = _load_or_create_config(args)
     if args.channel:
@@ -311,6 +326,16 @@ def main(argv: Optional[list] = None) -> int:
     _add_config_arg(p_remote)
     p_remote.add_argument("--json", action="store_true", help="Print as JSON")
     p_remote.set_defaults(func=_cmd_remote)
+
+    p_serve = sub.add_parser(
+        "serve",
+        help="Start the web dashboard (needs the [web] extra)",
+    )
+    _add_config_arg(p_serve)
+    _add_dir_arg(p_serve)
+    p_serve.add_argument("--host", default="127.0.0.1", help="Bind address")
+    p_serve.add_argument("--port", type=int, default=8000, help="Bind port")
+    p_serve.set_defaults(func=_cmd_serve)
 
     p_sync = sub.add_parser("sync", help="Sync remote playlists into the master folder")
     _add_config_arg(p_sync)

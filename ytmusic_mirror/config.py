@@ -58,6 +58,8 @@ DEFAULTS = {
     "deleted_playlist_policy": "archive",
     "orphan_policy": "smart",
     "download": {},
+    "scheduler_enabled": False,
+    "scheduler_cron": "0 0 * * *",
 }
 
 
@@ -103,6 +105,8 @@ class Config:
     deleted_playlist_policy: str = "archive"
     orphan_policy: str = "smart"
     download: dict = field(default_factory=dict)
+    scheduler_enabled: bool = False
+    scheduler_cron: str = "0 0 * * *"
 
     @property
     def effective_archive_dir(self) -> Path:
@@ -122,6 +126,8 @@ class Config:
             "deleted_playlist_policy": self.deleted_playlist_policy,
             "orphan_policy": self.orphan_policy,
             "download": dict(self.download),
+            "scheduler_enabled": bool(self.scheduler_enabled),
+            "scheduler_cron": self.scheduler_cron,
         }
 
     @classmethod
@@ -139,6 +145,8 @@ class Config:
             deleted_playlist_policy=str(merged.get("deleted_playlist_policy") or "archive"),
             orphan_policy=str(merged.get("orphan_policy") or "smart"),
             download=dict(merged.get("download") or {}),
+            scheduler_enabled=bool(merged.get("scheduler_enabled", False)),
+            scheduler_cron=str(merged.get("scheduler_cron") or "0 0 * * *"),
         )
         return cfg
 

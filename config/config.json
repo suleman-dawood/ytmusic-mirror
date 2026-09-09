@@ -1,0 +1,14 @@
+{
+  "music_dir": "/music",
+  "channel_url": "https://www.youtube.com/@SulemanDawood-y6k",
+  "playlists": [],
+  "cookies_from_browser": "",
+  "cookie_file": "",
+  "remote_components": [],
+  "archive_dir": "",
+  "deleted_playlist_policy": "archive",
+  "orphan_policy": "smart",
+  "download": {},
+  "scheduler_enabled": false,
+  "scheduler_cron": "0 0 * * *"
+}
